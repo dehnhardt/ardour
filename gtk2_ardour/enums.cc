@@ -89,6 +89,7 @@ setup_gtk_ardour_enums ()
 
 	REGISTER_ENUM (Overlaid);
 	REGISTER_ENUM (Stacked);
+	REGISTER_ENUM (Comping);
 	REGISTER (layer_display);
 
 	REGISTER_ENUM (ByEndInFile);

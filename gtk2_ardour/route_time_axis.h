@@ -263,6 +263,7 @@ protected:
 	RouteGroupMenu*     route_group_menu;
 	Gtk::MenuItem*      overlaid_menu_item;
 	Gtk::MenuItem*      stacked_menu_item;
+	Gtk::MenuItem*      comping_menu_item;
 
 	ArdourCanvas::Rectangle* timestretch_rect;
 

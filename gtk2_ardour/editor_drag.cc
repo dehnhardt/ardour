@@ -1354,6 +1354,9 @@ RegionMotionDrag::motion (GdkEvent* event, bool first_move)
 			case Stacked:
 				track_origin.y += (cv->layers() - i->layer - 1) * cv->child_height ();
 				break;
+			case Comping:
+				track_origin.y += (cv->layers() - i->layer - 1) * cv->child_height ();
+				break;
 			case Expanded:
 				track_origin.y += (cv->layers() - i->layer - 0.5) * 2 * cv->child_height ();
 				break;

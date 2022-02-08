@@ -8738,6 +8738,13 @@ Editor::layer_display_stacked ()
 }
 
 void
+Editor::layer_display_comping ()
+{
+	TrackViewList & tvl (selection->tracks.empty() ? track_views : selection->tracks);
+	tvl.foreach_route_time_axis (boost::bind (&RouteTimeAxisView::set_layer_display, _1, Comping));
+}
+
+void
 Editor::launch_playlist_selector ()
 {
 	TrackViewList & tvl (selection->tracks);

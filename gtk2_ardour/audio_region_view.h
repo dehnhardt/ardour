@@ -157,6 +157,8 @@ protected:
 		WaveformLogScaled = 0x10,
 	};
 
+	std::vector<ArdourCanvas::Rectangle *> selectedCompingParts;
+
 	std::vector<ArdourWaveView::WaveView *> waves;
 	std::vector<ArdourWaveView::WaveView *> tmp_waves; ///< see \ref create_waves()
 

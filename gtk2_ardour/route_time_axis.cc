@@ -120,6 +120,7 @@ RouteTimeAxisView::RouteTimeAxisView (PublicEditor& ed, Session* sess, ArdourCan
 	, route_group_menu (0)
 	, overlaid_menu_item (0)
 	, stacked_menu_item (0)
+	, comping_menu_item (0)
 	, gm (sess, true, 75, 14)
 	, _ignore_set_layer_display (false)
 	, pan_automation_item(NULL)
@@ -688,6 +689,12 @@ RouteTimeAxisView::build_display_menu ()
 		i->signal_toggled().connect (sigc::bind (sigc::mem_fun (*this, &RouteTimeAxisView::layer_display_menu_change), i));
 		stacked_menu_item = i;
 
+		layers_items.push_back (RadioMenuElem (layers_group, _("Comping")));
+		i = dynamic_cast<RadioMenuItem*> (&layers_items.back ());
+		i->set_active (layer_display() == Comping);
+		i->signal_toggled().connect (sigc::bind (sigc::mem_fun (*this, &RouteTimeAxisView::layer_display_menu_change), i));
+		comping_menu_item = i;
+
 		_ignore_set_layer_display = false;
 
 		items.push_back (MenuElem (_("Layers"), *layers_menu));
@@ -876,8 +883,10 @@ RouteTimeAxisView::layer_display_menu_change (Gtk::MenuItem* item)
 	if (dynamic_cast<RadioMenuItem*>(item)->get_active()) {
 		if (item == stacked_menu_item) {
 			set_layer_display (Stacked);
-		} else {
+		} else if (item == overlaid_menu_item) {
 			set_layer_display (Overlaid);
+		} else {
+			set_layer_display (Comping);
 		}
 	}
 }
@@ -2207,7 +2216,7 @@ RouteTimeAxisView::set_layer_display (LayerDisplay d)
 	if (_ignore_set_layer_display) {
 		return;
 	}
-
+	
 	if (_view) {
 		_view->set_layer_display (d);
 	}

@@ -25,10 +25,12 @@
 #ifndef __gtk_ardour_time_axis_view_item_h__
 #define __gtk_ardour_time_axis_view_item_h__
 
+#include <memory>
 #include <string>
 #include <gdk/gdk.h>
 #include <gdkmm/color.h>
 #include <pangomm/fontdescription.h>
+#include <vector>
 #include "pbd/signals.h"
 #include "selectable.h"
 
@@ -44,6 +46,13 @@ namespace ArdourCanvas {
 
 using ARDOUR::samplepos_t;
 using ARDOUR::samplecnt_t;
+
+struct CompingSelection {
+public:
+	samplepos_t _start;
+	samplecnt_t _length;
+	CompingSelection( samplepos_t start, samplecnt_t length ) : _start(start), _length(length) {}
+};
 
 /**
  * Base class for items that may appear upon a TimeAxisView.
@@ -63,6 +72,8 @@ public:
 	virtual void set_min_duration(samplecnt_t, void*);
 	samplecnt_t get_min_duration() const;
 	virtual void set_position_locked(bool, void*);
+	void add_comping_selection( samplepos_t start, samplecnt_t length );
+	void remove_comping_selection( samplepos_t start, samplecnt_t length );
 	bool get_position_locked() const;
 	void set_max_duration_active(bool, void*);
 	bool get_max_duration_active() const;
@@ -145,6 +156,12 @@ public:
 
 	/** Emitted when the mionimum item duration is changed */
 	sigc::signal<void,samplecnt_t,void*> MinDurationChanged;
+
+	/** Emitted when a comping selection is made */
+	sigc::signal<void,samplepos_t,samplecnt_t> CompingSelectionAdded;
+
+	/** Emitted when a comping selection is made */
+	sigc::signal<void,samplepos_t,samplecnt_t> CompingSelectionRemoved;
 
 	enum Visibility {
 		ShowFrame = 0x1,
@@ -233,6 +250,8 @@ protected:
 	/* with these two values, if frame_handle_start == 0 then frame_handle_end will also be 0 */
 	ArdourCanvas::Rectangle* frame_handle_start; ///< `frame' (fade) handle for the start of the item, or 0
 	ArdourCanvas::Rectangle* frame_handle_end; ///< `frame' (fade) handle for the end of the item, or 0
+
+	std::vector<CompingSelection> selectedCompingRegions;
 
 	bool frame_handle_crossing (GdkEvent*, ArdourCanvas::Rectangle*);
 

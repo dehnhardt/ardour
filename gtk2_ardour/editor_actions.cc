@@ -265,6 +265,7 @@ Editor::register_actions ()
 
 	reg_sens (editor_actions, "layer-display-stacked", _("Stacked layer display"), sigc::mem_fun (*this, &Editor::layer_display_stacked));
 	reg_sens (editor_actions, "layer-display-overlaid", _("Overlaid layer display"), sigc::mem_fun (*this, &Editor::layer_display_overlaid));
+	reg_sens (editor_actions, "layer-display-comping", _("Comping layer display"), sigc::mem_fun (*this, &Editor::layer_display_comping));
 
 	act = reg_sens (editor_actions, "show-plist-selector", _("Show Playlist Selector"), sigc::mem_fun (*this, &Editor::launch_playlist_selector));
 	ActionManager::stripable_selection_sensitive_actions.push_back (act);

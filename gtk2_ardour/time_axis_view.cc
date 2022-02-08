@@ -1270,6 +1270,17 @@ TimeAxisView::covers_y_position (double y) const
 				}
 			}
 			break;
+		case Comping:
+			if (view ()) {
+				/* compute layer */
+				l = layer_t ((_y_position + height - y) / (view()->child_height ()));
+				/* clamp to max layers to be on the safe side; sometimes the above calculation
+				   returns a too-high value */
+				if (l == view()->layers ()) {
+					l = view()->layers() - 1;
+				}
+			}
+			break;
 		case Expanded:
 			if (view ()) {
 				int const n = floor ((_y_position + height - y) / (view()->child_height ()));

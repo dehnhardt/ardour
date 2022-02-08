@@ -300,8 +300,8 @@ StreamView::playlist_layered (boost::weak_ptr<Track> wtr)
 	if (tr->playlist()) {
 		_layers = tr->playlist()->top_layer() + 1;
 	}
-
-	if (_layer_display == Stacked) {
+ 
+	if (_layer_display == Stacked || _layer_display == Comping) {
 		update_contents_height ();
 		/* tricky. playlist_changed() does this as well, and its really inefficient. */
 		update_coverage_frame ();
@@ -610,6 +610,8 @@ StreamView::child_height () const
 		return height;
 	case Stacked:
 		return height / _layers;
+	case Comping:
+		return height / (_layers + 1);
 	case Expanded:
 		return height / (_layers * 2 + 1);
 	}
@@ -631,6 +633,9 @@ StreamView::update_contents_height ()
 		case Stacked:
 			(*i)->set_y (height - ((*i)->region()->layer() + 1) * h);
 			break;
+		case Comping:
+			(*i)->set_y (height - ((*i)->region()->layer() + 1) * h);
+			break;
 		case Expanded:
 			(*i)->set_y (height - ((*i)->region()->layer() + 1) * 2 * h);
 			break;
@@ -645,6 +650,7 @@ StreamView::update_contents_height ()
 			i->rectangle->set_y1 (height);
 			break;
 		case Stacked:
+		case Comping:
 		case Expanded:
 			/* In stacked displays, the recregion is always at the top */
 			i->rectangle->set_y0 (0);

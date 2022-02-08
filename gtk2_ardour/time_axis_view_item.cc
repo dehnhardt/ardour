@@ -27,6 +27,7 @@
 
 #include <utility>
 
+#include "enums.h"
 #include "pbd/error.h"
 
 #include "ardour/types.h"
@@ -481,6 +482,32 @@ std::string
 TimeAxisViewItem::get_item_name() const
 {
 	return item_name;
+}
+
+
+/**
+ * add a selection for the comping target to this view item and emit a signal
+ * 
+ * @param start start of the selection to add
+ * @param length length of the selection to add
+ */
+void TimeAxisViewItem::add_comping_selection( samplepos_t start, samplecnt_t length ) {
+	CompingSelection compingSelection( start, length );
+	selectedCompingRegions.push_back(compingSelection);
+	CompingSelectionAdded( start, length );
+}
+
+/**
+ * remove a selection for the comping target from this view item and emits a signal
+ * 
+ * @param start start of the selection to remove
+ * @param length length of the selection to remove
+ */
+void TimeAxisViewItem::remove_comping_selection( samplepos_t start, samplecnt_t length ) {
+	remove_if( selectedCompingRegions.begin(), selectedCompingRegions.end(), [=]( CompingSelection selection ){
+		return selection._start == start && selection._length == length;
+	});
+	CompingSelectionRemoved( start, length );
 }
 
 /**

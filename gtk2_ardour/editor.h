@@ -1542,6 +1542,7 @@ private:
 	void toggle_layer_display ();
 	void layer_display_stacked ();
 	void layer_display_overlaid ();
+	void layer_display_comping ();
 
 	void launch_playlist_selector ();
 

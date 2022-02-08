@@ -1658,7 +1658,7 @@ AudioRegionView::update_coverage_frame (LayerDisplay d)
 {
 	RegionView::update_coverage_frame (d);
 
-	if (d == Stacked) {
+	if (d == Stacked || d == Comping ) {
 		if (fade_in_handle)       { fade_in_handle->raise_to_top (); }
 		if (fade_out_handle)      { fade_out_handle->raise_to_top (); }
 		if (fade_in_trim_handle)  { fade_in_trim_handle->raise_to_top (); }
