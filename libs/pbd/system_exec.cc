@@ -79,17 +79,17 @@ SystemExec::init ()
 #endif
 }
 
-SystemExec::SystemExec (std::string c, std::string a)
+SystemExec::SystemExec (std::string c, std::string a, bool supress_ld_env)
 	: cmd(c)
 {
 	init ();
 
 	argp = NULL;
-	make_envp();
+	make_envp (supress_ld_env);
 	make_argp(a);
 }
 
-SystemExec::SystemExec (std::string c, char **a)
+SystemExec::SystemExec (std::string c, char **a, bool supress_ld_env)
 	: cmd(c) , argp(a)
 {
 	init ();
@@ -97,10 +97,10 @@ SystemExec::SystemExec (std::string c, char **a)
 #ifdef PLATFORM_WINDOWS
 	make_wargs(a);
 #endif
-	make_envp();
+	make_envp (supress_ld_env);
 }
 
-SystemExec::SystemExec (std::string command, const std::map<char, std::string> subs)
+SystemExec::SystemExec (std::string command, const std::map<char, std::string> subs, bool supress_ld_env)
 {
 	init ();
 	make_argp_escaped(command, subs);
@@ -141,7 +141,7 @@ SystemExec::SystemExec (std::string command, const std::map<char, std::string> s
 	// Glib::find_program_in_path () is only available in Glib >= 2.28
 	// cmd = Glib::find_program_in_path (argp[0]);
 #endif
-	make_envp();
+	make_envp (supress_ld_env);
 }
 
 char*
@@ -364,7 +364,7 @@ CALLBACK my_terminateApp(HWND hwnd, LPARAM procId)
 /* PROCESS API */
 
 void
-SystemExec::make_envp()
+SystemExec::make_envp (bool)
 {
 	; /* environemt is copied over with CreateProcess(...,env=0 ,..) */
 }
@@ -431,7 +431,11 @@ SystemExec::wait (int options)
 	while (is_running()) {
 		WaitForSingleObject(pid->hProcess, 40);
 	}
-	return 0;
+	DWORD exit_code;
+	if (GetExitCodeProcess(pid->hProcess, &exit_code)) {
+		return exit_code;
+	}
+	return -1;
 }
 
 bool
@@ -590,16 +594,25 @@ SystemExec::write_to_stdin (const void* data, size_t bytes)
 extern char **environ;
 
 void
-SystemExec::make_envp()
+SystemExec::make_envp (bool supress_ld_env)
 {
-	int i = 0;
-	envp = (char **) calloc(1, sizeof(char*));
+	int i = 0, j = 0;
+	envp = (char **) calloc (1, sizeof(char*));
 	/* copy current environment */
 	for (i = 0; environ[i]; ++i) {
-	  envp[i] = strdup(environ[i]);
-	  envp = (char **) realloc(envp, (i+2) * sizeof(char*));
+#ifdef __APPLE__
+		if (supress_ld_env && 0 == strncmp (environ[i], "DYLD_FALLBACK_LIBRARY_PATH", 26)) {
+			continue;
+		}
+#else
+		if (supress_ld_env && 0 == strncmp (environ[i], "LD_LIBRARY_PATH", 15)) {
+			continue;
+		}
+#endif
+	  envp[j++] = strdup(environ[i]);
+	  envp = (char **) realloc(envp, (j + 1) * sizeof(char*));
 	}
-	envp[i] = 0;
+	envp[j] = 0;
 }
 
 void
@@ -707,7 +720,7 @@ SystemExec::wait (int options)
 			}
 		} /* else the process is still running */
 	}
-	return status;
+	return WEXITSTATUS (status);
 }
 
 bool

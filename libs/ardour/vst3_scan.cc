@@ -139,7 +139,7 @@ discover_vst3 (boost::shared_ptr<ARDOUR::VST3PluginModule> m, std::vector<ARDOUR
 		PBD::info << "FactoryInfo: '" << fi.vendor << "' '" << fi.url << "' '" << fi.email << "'" << endmsg;
 	}
 
-	IPluginFactory2* factory2 = FUnknownPtr<IPluginFactory2> (factory);
+	IPtr<IPluginFactory2> factory2 = FUnknownPtr<IPluginFactory2> (factory);
 
 	int32 class_cnt = factory->countClasses ();
 	if (verbose) {
@@ -203,7 +203,7 @@ discover_vst3 (boost::shared_ptr<ARDOUR::VST3PluginModule> m, std::vector<ARDOUR
 				continue;
 			}
 
-			FUnknownPtr<Vst::IAudioProcessor> processor;
+			IPtr<Vst::IAudioProcessor> processor;
 			if (!(processor = FUnknownPtr<Vst::IAudioProcessor> (component))) {
 				cerr << "VST3: No valid processor";
 				component->terminate ();
@@ -309,7 +309,7 @@ ARDOUR::module_path_vst3 (string const& path)
 		std::string p1 = Glib::path_get_dirname (path);
 		std::string p2 = Glib::path_get_dirname (p1);
 		std::string p3 = Glib::path_get_dirname (p2);
-		if (   Glib::path_get_basename (p1) == vst3_bindir ()
+		if (  (Glib::path_get_basename (p1) == "x86_64-win" || Glib::path_get_basename (p1) == "x86-win")
 		    && Glib::path_get_basename (p2) == "Contents"
 		    && Glib::path_get_basename (p3) == Glib::path_get_basename (path)
 		   ) {
@@ -328,7 +328,7 @@ ARDOUR::module_path_vst3 (string const& path)
 #ifdef __APPLE__
 	/* Check for "Contents/MacOS/" and "Context/Info.plist".
 	 * VST3MacModule calls CFBundleCreate() which handles Info.plist files.
-	 * (on macOS/X the binrary name may differ from the bundle name)
+	 * (on macOS/X the binary name may differ from the bundle name)
 	 */
 	string plist = Glib::build_filename (path, "Contents", "Info.plist");
 	if (Glib::file_test (Glib::path_get_dirname (module_path), Glib::FILE_TEST_IS_DIR) &&

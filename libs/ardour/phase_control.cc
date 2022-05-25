@@ -25,9 +25,9 @@ using namespace std;
 using namespace PBD;
 using namespace ARDOUR;
 
-PhaseControl::PhaseControl (Session& session, std::string const & name)
+PhaseControl::PhaseControl (Session& session, std::string const & name, Temporal::TimeDomain td)
 	: AutomationControl (session, PhaseAutomation, ParameterDescriptor (PhaseAutomation),
-	                     boost::shared_ptr<AutomationList>(new AutomationList(Evoral::Parameter(PhaseAutomation))),
+	                     boost::shared_ptr<AutomationList>(new AutomationList(Evoral::Parameter(PhaseAutomation), td)),
 	                     name)
 {
 }
@@ -35,7 +35,9 @@ PhaseControl::PhaseControl (Session& session, std::string const & name)
 void
 PhaseControl::actually_set_value (double val, Controllable::GroupControlDisposition gcd)
 {
+	size_t s = _phase_invert.size ();
 	_phase_invert = boost::dynamic_bitset<> (std::numeric_limits<double>::digits, (unsigned long) val);
+	_phase_invert.resize (s);
 
 	AutomationControl::actually_set_value (val, gcd);
 }
@@ -68,7 +70,7 @@ PhaseControl::resize (uint32_t n)
 }
 
 XMLNode&
-PhaseControl::get_state ()
+PhaseControl::get_state () const
 {
 	XMLNode& node (AutomationControl::get_state ());
 

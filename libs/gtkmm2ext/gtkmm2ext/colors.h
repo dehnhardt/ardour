@@ -31,6 +31,8 @@ namespace Gtkmm2ext
 
 typedef uint32_t Color;
 
+extern LIBGTKMM2EXT_API Color random_color ();
+
 /* conventient way to use Gtkmm2ext::Color with libcairo */
 extern LIBGTKMM2EXT_API void set_source_rgba (Cairo::RefPtr<Cairo::Context>, Gtkmm2ext::Color);
 extern LIBGTKMM2EXT_API void set_source_rgb_a (Cairo::RefPtr<Cairo::Context>, Gtkmm2ext::Color, float alpha);  //override the color's alpha
@@ -113,8 +115,8 @@ struct LIBGTKMM2EXT_API HSV
 	double distance (const HSV& other) const;
 	HSV delta (const HSV& other) const;
 
-	HSV darker (double factor = 1.3) const { return shade (factor); }
-	HSV lighter (double factor = 0.7) const { return shade (factor); }
+	HSV darker (double factor = 1.3) const;
+	HSV lighter (double factor = 0.7) const;
 
 	HSV shade (double factor) const;
 	HSV mix (const HSV& other, double amt) const;

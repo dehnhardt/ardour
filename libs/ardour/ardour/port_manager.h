@@ -102,12 +102,17 @@ public:
 		AudioInputPort (samplecnt_t);
 		AudioPortScope scope;
 		AudioPortMeter meter;
+		void apply_falloff (pframes_t, samplecnt_t sr, bool reset = false);
+		void silence (pframes_t);
+		void process (Sample const*, pframes_t, bool reset = false);
 	};
 
 	struct MIDIInputPort {
 		MIDIInputPort (samplecnt_t);
 		MIDIPortMonitor monitor;
 		MIDIPortMeter   meter;
+		void apply_falloff (pframes_t, samplecnt_t sr, bool reset = false);
+		void process_event (uint8_t const*, size_t);
 	};
 
 	typedef std::map<std::string, AudioInputPort, SortByPortName> AudioInputPorts;
@@ -117,6 +122,8 @@ public:
 	virtual ~PortManager () {}
 
 	PortEngine& port_engine ();
+
+	static void falloff_cache_calc (pframes_t, samplecnt_t);
 
 	uint32_t    port_name_size () const;
 	std::string my_name () const;
@@ -157,6 +164,7 @@ public:
 
 	static bool port_is_virtual_piano (std::string const&);
 	static bool port_is_control_only (std::string const&);
+	static bool port_is_physical_input_monitor_enable (std::string const&);
 
 	/* other Port management */
 
@@ -291,6 +299,8 @@ protected:
 	 * Realtime safe.
 	 */
 	void cycle_end (pframes_t nframes, Session* s = 0);
+
+	void reinit ();
 
 	void cycle_end_fade_out (gain_t, gain_t, pframes_t, Session* s = 0);
 

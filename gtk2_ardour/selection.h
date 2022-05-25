@@ -42,6 +42,7 @@
 #include "point_selection.h"
 #include "marker_selection.h"
 #include "midi_selection.h"
+#include "trigger_selection.h"
 
 class TimeAxisView;
 class RegionView;
@@ -90,6 +91,7 @@ public:
 	PlaylistSelection    playlists;
 	PointSelection       points;
 	MarkerSelection      markers;
+	TriggerSelection     triggers;
 
 	/** only used when this class is used as a cut buffer */
 	MidiNoteSelection    midi_notes;
@@ -111,6 +113,7 @@ public:
 	sigc::signal<void> PointsChanged;
 	sigc::signal<void> MarkersChanged;
 	sigc::signal<void> MidiNotesChanged;
+	sigc::signal<void> TriggersChanged;
 
 	void clear ();
 
@@ -126,6 +129,13 @@ public:
 	bool selected (RegionView*) const;
 	bool selected (ArdourMarker*) const;
 	bool selected (ControlPoint*) const;
+	bool selected (TriggerEntry*) const;
+
+	/* ToDo: some region operations (midi quantize, audio reverse) expect
+	 * a RegionSelection (a list of regionviews).  We're likely going to
+	 * need a region_view + time_axis_view proxy, and this will get it.
+	 */
+	RegionSelection trigger_regionview_proxy () const;
 
 	void set (std::list<Selectable*> const &);
 	void add (std::list<Selectable*> const &);
@@ -136,14 +146,15 @@ public:
 	void set (const MidiNoteSelection&);
 	void set (RegionView*, bool also_clear_tracks = true);
 	void set (std::vector<RegionView*>&);
-	long set (samplepos_t, samplepos_t);
-	void set_preserving_all_ranges (samplepos_t, samplepos_t);
+	long set (Temporal::timepos_t const &, Temporal::timepos_t const &);
+	void set_preserving_all_ranges (Temporal::timepos_t const &, Temporal::timepos_t const &);
 	void set (boost::shared_ptr<Evoral::ControlList>);
 	void set (boost::shared_ptr<ARDOUR::Playlist>);
 	void set (const std::list<boost::shared_ptr<ARDOUR::Playlist> >&);
 	void set (ControlPoint *);
 	void set (ArdourMarker*);
 	void set (const RegionSelection&);
+	void set (TriggerEntry*);
 
 	void toggle (TimeAxisView*);
 	void toggle (const TrackViewList&);
@@ -151,13 +162,14 @@ public:
 	void toggle (RegionView*);
 	void toggle (MidiCutBuffer*);
 	void toggle (std::vector<RegionView*>&);
-	long toggle (samplepos_t, samplepos_t);
+	long toggle (Temporal::timepos_t const &, Temporal::timepos_t const &);
 	void toggle (ARDOUR::AutomationList*);
 	void toggle (boost::shared_ptr<ARDOUR::Playlist>);
 	void toggle (const std::list<boost::shared_ptr<ARDOUR::Playlist> >&);
 	void toggle (ControlPoint *);
 	void toggle (std::vector<ControlPoint*> const &);
 	void toggle (ArdourMarker*);
+	void toggle (TriggerEntry*);
 
 	void add (TimeAxisView*);
 	void add (const TrackViewList&);
@@ -165,7 +177,7 @@ public:
 	void add (RegionView*);
 	void add (MidiCutBuffer*);
 	void add (std::vector<RegionView*>&);
-	long add (samplepos_t, samplepos_t);
+	long add (Temporal::timepos_t const &, Temporal::timepos_t const &);
 	void add (boost::shared_ptr<Evoral::ControlList>);
 	void add (boost::shared_ptr<ARDOUR::Playlist>);
 	void add (const std::list<boost::shared_ptr<ARDOUR::Playlist> >&);
@@ -175,10 +187,13 @@ public:
 	void add (const std::list<ArdourMarker*>&);
 	void add (const RegionSelection&);
 	void add (const PointSelection&);
+	void add (TriggerEntry*);
+
 	void remove (TimeAxisView*);
 	void remove (const TrackViewList&);
 	void remove (const MidiNoteSelection&);
 	void remove (RegionView*);
+	void remove (std::vector<RegionView*>);
 	void remove (MidiCutBuffer*);
 	void remove (uint32_t selection_id);
 	void remove (samplepos_t, samplepos_t);
@@ -188,12 +203,13 @@ public:
 	void remove (const std::list<Selectable*>&);
 	void remove (ArdourMarker*);
 	void remove (ControlPoint *);
+	void remove (TriggerEntry*);
 
 	void remove_regions (TimeAxisView *);
 
-	void move_time (samplecnt_t);
+	void move_time (Temporal::timecnt_t const &);
 
-	void replace (uint32_t time_index, samplepos_t start, samplepos_t end);
+	void replace (uint32_t time_index, Temporal::timepos_t const & start, Temporal::timepos_t const & end);
 
 	/*
 	 * A note about items in an editing Selection:
@@ -218,6 +234,7 @@ public:
 	void clear_points (bool with_signal = true);
 	void clear_markers (bool with_signal = true);
 	void clear_midi_notes (bool with_signal = true);
+	void clear_triggers (bool with_signal = true);
 
 	void foreach_region (void (ARDOUR::Region::*method)(void));
 	void foreach_regionview (void (RegionView::*method)(void));

@@ -206,7 +206,7 @@ Editor::set_selected_mixer_strip (TimeAxisView& view)
 		return;
 	}
 
-	// if this is an automation track, then we shold the mixer strip should
+	// if this is an automation track, then the mixer strip should
 	// show the parent
 
 	boost::shared_ptr<ARDOUR::Stripable> stripable;
@@ -260,7 +260,7 @@ Editor::current_mixer_strip_hidden ()
 }
 
 void
-Editor::maybe_add_mixer_strip_width (XMLNode& node)
+Editor::maybe_add_mixer_strip_width (XMLNode& node) const
 {
 	if (current_mixer_strip) {
 		node.set_property ("mixer-width", editor_mixer_strip_width);

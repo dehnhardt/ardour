@@ -60,6 +60,8 @@
 #include "panner_ui.h"
 #include "enums.h"
 #include "processor_box.h"
+#include "triggerbox_ui.h"
+#include "trigger_master.h"
 #include "visibility_group.h"
 
 namespace ARDOUR {
@@ -70,6 +72,7 @@ namespace ARDOUR {
 	class PortInsert;
 	class Bundle;
 	class Plugin;
+	class TriggerBox;
 }
 namespace Gtk {
 	class Window;
@@ -81,6 +84,7 @@ class MotionController;
 class RouteGroupMenu;
 class ArdourWindow;
 class AutomationController;
+class TriggerBoxWidget;
 
 class MixerStrip : public AxisView, public RouteUI, public Gtk::EventBox
 {
@@ -151,6 +155,8 @@ public:
 
 	void set_selected (bool yn);
 
+	void set_trigger_display (boost::shared_ptr<ARDOUR::TriggerBox>);
+
 	static MixerStrip* entered_mixer_strip() { return _entered_mixer_strip; }
 
 protected:
@@ -186,6 +192,7 @@ private:
 	ProcessorBox processor_box;
 	GainMeter    gpm;
 	PannerUI     panners;
+	TriggerBoxWidget trigger_display;
 
 	Glib::RefPtr<Gtk::SizeGroup> button_size_group;
 
@@ -209,7 +216,7 @@ private:
 
 	void comment_button_resized (Gtk::Allocation&);
 
-	ArdourWidgets::ArdourButton* midi_input_enable_button;
+	ArdourWidgets::ArdourButton midi_input_enable_button;
 	Gtk::HBox input_button_box;
 
 	std::string longest_label;
@@ -218,11 +225,12 @@ private:
 	bool input_active_button_press (GdkEventButton*);
 	bool input_active_button_release (GdkEventButton*);
 
-	void help_count_plugins (boost::weak_ptr<ARDOUR::Processor>);
-	uint32_t _plugin_insert_cnt;
-
 	gint    mark_update_safe ();
 	guint32 mode_switch_in_progress;
+
+	/*Trigger widget*/
+	FittedCanvasWidget _tmaster_widget;
+	TriggerMaster*     _tmaster;
 
 	ArdourWidgets::ArdourButton name_button;
 	ArdourWidgets::ArdourButton _comment_button;

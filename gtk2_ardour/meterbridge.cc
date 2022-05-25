@@ -244,18 +244,10 @@ Meterbridge::set_window_pos_and_size ()
 	}
 }
 
-void
-Meterbridge::get_window_pos_and_size ()
-{
-	get_position(m_root_x, m_root_y);
-	get_size(m_width, m_height);
-}
-
 bool
 Meterbridge::hide_window (GdkEventAny *ev)
 {
 	if (!_visible) return 0;
-	get_window_pos_and_size();
 	_visible = false;
 	return just_hide_it(ev, static_cast<Gtk::Window *>(this));
 }
@@ -491,14 +483,9 @@ Meterbridge::set_state (const XMLNode& node)
 }
 
 XMLNode&
-Meterbridge::get_state (void)
+Meterbridge::get_state () const
 {
 	XMLNode* node = new XMLNode ("Meterbridge");
-
-	if (is_realized() && _visible) {
-		get_window_pos_and_size ();
-	}
-
 	XMLNode* geometry = new XMLNode ("geometry");
 	geometry->set_property(X_("x-size"), m_width);
 	geometry->set_property(X_("y-size"), m_height);
@@ -528,7 +515,7 @@ Meterbridge::stop_updating ()
 void
 Meterbridge::fast_update_strips ()
 {
-	if (!is_mapped () || !_session) {
+	if (!get_mapped () || !_session) {
 		return;
 	}
 	for (list<MeterBridgeStrip>::iterator i = strips.begin(); i != strips.end(); ++i) {
@@ -760,6 +747,9 @@ Meterbridge::parameter_changed (std::string const & p)
 	else if (p == "show-monitor-on-meterbridge") {
 		scroller.queue_resize();
 	}
+	else if (p == "show-fader-on-meterbridge") {
+		scroller.queue_resize();
+	}
 	else if (p == "track-name-number") {
 		scroller.queue_resize();
 	}
@@ -769,4 +759,19 @@ void
 Meterbridge::on_theme_changed ()
 {
 	meter_clear_pattern_cache();
+}
+
+bool
+Meterbridge::on_configure_event (GdkEventConfigure* conf)
+{
+	bool ret = Gtk::Window::on_configure_event (conf);
+
+	Glib::RefPtr<const Gdk::Window> win = get_window();
+
+	if (win) {
+		win->get_size (m_width, m_height);
+		win->get_position (m_root_x, m_root_y);
+	}
+
+	return ret;
 }

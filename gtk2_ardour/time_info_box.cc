@@ -166,7 +166,7 @@ TimeInfoBox::clock_button_release_event (GdkEventButton* ev, AudioClock* src)
 
 	if (ev->button == 1) {
 		if (!src->off()) {
-			_session->request_locate (src->current_time ());
+			_session->request_locate (src->current_time ().samples());
 		}
 		return true;
 	}
@@ -234,22 +234,22 @@ TimeInfoBox::set_session (Session* s)
 void
 TimeInfoBox::region_selection_changed ()
 {
-	samplepos_t s, e;
+	timepos_t s, e;
 	Selection& selection (Editor::instance().get_selection());
-	s = selection.regions.start();
-	e = selection.regions.end_sample();
+	s = selection.regions.start_time();
+	e = selection.regions.end_time();
 	selection_start->set_off (false);
 	selection_end->set_off (false);
 	selection_length->set_off (false);
 	selection_start->set (s);
 	selection_end->set (e);
-	selection_length->set (e, false, s);
+	selection_length->set_duration (timecnt_t (e), false, timecnt_t (s));
 }
 
 void
 TimeInfoBox::selection_changed ()
 {
-	samplepos_t s, e;
+	timepos_t s, e;
 	Selection& selection (Editor::instance().get_selection());
 
 	region_property_connections.drop_connections();
@@ -272,19 +272,20 @@ TimeInfoBox::selection_changed ()
 					selection_start->set_off (false);
 					selection_end->set_off (false);
 					selection_length->set_off (false);
-					selection_start->set (selection.time.start());
-					selection_end->set (selection.time.end_sample());
-					selection_length->set (selection.time.end_sample(), false, selection.time.start());
+					selection_start->set (selection.time.start_time());
+					selection_end->set (selection.time.end_time());
+					selection_length->set_is_duration (true, selection.time.start_time());
+					selection_length->set_duration (selection.time.start_time().distance (selection.time.end_time()));
 				} else {
 					selection_start->set_off (true);
 					selection_end->set_off (true);
 					selection_length->set_off (true);
 				}
 			} else {
-				s = max_samplepos;
-				e = 0;
+				s = timepos_t::max (selection.points.front()->line().the_list()->time_domain());
+				e = timepos_t::zero (s.time_domain());
 				for (PointSelection::iterator i = selection.points.begin(); i != selection.points.end(); ++i) {
-					samplepos_t const p = (*i)->line().session_position ((*i)->model ());
+					timepos_t const p = (*i)->line().session_position ((*i)->model ());
 					s = min (s, p);
 					e = max (e, p);
 				}
@@ -293,7 +294,8 @@ TimeInfoBox::selection_changed ()
 				selection_length->set_off (false);
 				selection_start->set (s);
 				selection_end->set (e);
-				selection_length->set (e, false, s);
+				selection_length->set_is_duration (true, s);
+				selection_length->set (e, false, timecnt_t (s));
 			}
 		} else {
 			/* this is more efficient than tracking changes per region in large selections */
@@ -318,14 +320,15 @@ TimeInfoBox::selection_changed ()
 
 			if (tact->get_active() &&  !selection.regions.empty()) {
 				/* show selected regions */
-				s = selection.regions.start();
-				e = selection.regions.end_sample();
+				s = selection.regions.start_time();
+				e = selection.regions.end_time();
 				selection_start->set_off (false);
 				selection_end->set_off (false);
 				selection_length->set_off (false);
 				selection_start->set (s);
 				selection_end->set (e);
-				selection_length->set (e, false, s);
+				selection_length->set_is_duration (true, s);
+				selection_length->set (e, false, timecnt_t (s));
 			} else {
 				selection_start->set_off (true);
 				selection_end->set_off (true);
@@ -335,9 +338,10 @@ TimeInfoBox::selection_changed ()
 			selection_start->set_off (false);
 			selection_end->set_off (false);
 			selection_length->set_off (false);
-			selection_start->set (selection.time.start());
-			selection_end->set (selection.time.end_sample());
-			selection_length->set (selection.time.end_sample(), false, selection.time.start());
+			selection_start->set (selection.time.start_time());
+			selection_end->set (selection.time.end_time());
+			selection_length->set_is_duration (true, selection.time.start_time());
+			selection_length->set_duration (selection.time.start_time().distance (selection.time.end_time()));
 		}
 		break;
 

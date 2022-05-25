@@ -30,9 +30,9 @@ function factory () return function ()
 			-- event using the session realtime-event dispatch mechanism:
 			Session:set_control (t:solo_control(), 1, PBD.GroupControlDisposition.NoGroup)
 
-			-- unmute the track, this also examplifies how one could use lists to modify
+			-- unmute the track, this also exemplifies how one could use lists to modify
 			-- multiple controllables at the same time (they should be of the same
-			-- paramater type - e.g. mute_control() of multiple tracks, they'll all
+			-- parameter type - e.g. mute_control() of multiple tracks, they'll all
 			-- change simultaneously in rt-context)
 			local ctrls = ARDOUR.ControlListPtr ()
 			ctrls:push_back (t:mute_control()) -- we could add more controls to change via push_back

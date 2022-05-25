@@ -75,7 +75,7 @@ struct PlaylistState {
 };
 
 bool
-Session::import_sndfile_as_region (string path, SrcQuality quality, samplepos_t& pos, SourceList& sources, ImportStatus& status, uint32_t current, uint32_t total)
+Session::import_sndfile_as_region (string path, SrcQuality quality, timepos_t& pos, SourceList& sources, ImportStatus& status, uint32_t current, uint32_t total)
 {
 	/* Import the source */
 	status.paths.clear();
@@ -113,7 +113,7 @@ Session::import_sndfile_as_region (string path, SrcQuality quality, samplepos_t&
 	string region_name;
 	bool use_timestamp;
 
-	use_timestamp = (pos == -1);
+	use_timestamp = (pos == timepos_t::max (Temporal::AudioTime));
 
 	/* take all the sources we have and package them up as a region */
 
@@ -127,8 +127,8 @@ Session::import_sndfile_as_region (string path, SrcQuality quality, samplepos_t&
 
 	PropertyList plist;
 
-	plist.add (ARDOUR::Properties::start, 0);
-	plist.add (ARDOUR::Properties::length, sources[0]->length (pos));
+	plist.add (ARDOUR::Properties::start, timepos_t (0));
+	plist.add (ARDOUR::Properties::length, timecnt_t (sources[0]->length (), pos));
 	plist.add (ARDOUR::Properties::name, region_name);
 	plist.add (ARDOUR::Properties::layer, 0);
 	plist.add (ARDOUR::Properties::whole_file, true);
@@ -164,11 +164,11 @@ Session::import_sndfile_as_region (string path, SrcQuality quality, samplepos_t&
 				if (as->natural_position() != 0) {
 					pos = as->natural_position();
 				} else {
-					pos = 0;
+					pos = timepos_t (pos.time_domain ());
 				}
 			} else {
 				/* should really get first position in MIDI file, but for now, use 0 */
-				pos = 0;
+				pos = timepos_t (pos.time_domain());
 			}
 		}
 	}
@@ -187,7 +187,7 @@ Session::import_pt_sources (PTFFormat& ptf, ImportStatus& status)
 	string fullpath;
 	bool ok = false;
 	bool onefailed = false;
-	samplepos_t pos = -1;
+	timepos_t pos = timepos_t::max (Temporal::AudioTime);
 
 	vector<PTFFormat::wav_t>::const_iterator w;
 	uint32_t wth = 0;
@@ -285,14 +285,12 @@ Session::import_pt_rest (PTFFormat& ptf)
 	uint16_t i;
 	uint16_t nth = 0;
 	uint16_t ntr = 0;
-	vector<struct ptflookup> usedtracks;
 	struct ptflookup utr;
 	vector<midipair> uniquetr;
 
 	vector<PlaylistState> playlists;
 	vector<PlaylistState>::iterator pl;
 
-	usedtracks.clear();
 	just_one_src.clear();
 	uniquetr.clear();
 	ptfregpair.clear();
@@ -311,8 +309,7 @@ Session::import_pt_rest (PTFFormat& ptf)
 						struct ptflookup rp;
 						PropertyList plist;
 
-						plist.add (ARDOUR::Properties::start, a->sampleoffset);
-						plist.add (ARDOUR::Properties::position, 0);
+						plist.add (ARDOUR::Properties::start, timepos_t (a->sampleoffset));
 						plist.add (ARDOUR::Properties::length, a->length);
 						plist.add (ARDOUR::Properties::name, a->name);
 						plist.add (ARDOUR::Properties::layer, 0);
@@ -378,10 +375,16 @@ Session::import_pt_rest (PTFFormat& ptf)
 				boost::shared_ptr<Region> r = RegionFactory::region_by_id (p->id);
 				DEBUG_TRACE (DEBUG::FileUtils, string_compose ("\twav(%1) reg(%2) tr(%3)\n", a->reg.wave.filename.c_str (), a->reg.index, a->index));
 
-				/* Use existing playlists */
-				boost::shared_ptr<Playlist> playlist = playlists[a->index].playlist;
+				/* Use track we created earlier */
+				existing_track = get_nth_audio_track (a->index);
+				assert (existing_track);
+
+				/* Put on existing track */
+				boost::shared_ptr<Playlist> playlist = existing_track->playlist ();
 				boost::shared_ptr<Region> copy (RegionFactory::create (r, true));
-				playlist->add_region (copy, a->reg.startpos);
+				playlist->clear_changes ();
+				playlist->add_region (copy, timepos_t (a->reg.startpos));
+				//add_command (new StatefulDiffCommand (playlist));
 			}
 		}
 	}
@@ -421,7 +424,7 @@ no_audio_tracks:
 				1,
 				a->trname,
 				PresentationInfo::max_order,
-				Normal));
+				Normal, true));
 		assert (mt.size () == 1);
 		midi_tracks[a->ptfindex] = mt.front ();
 	}
@@ -442,9 +445,9 @@ no_audio_tracks:
 		plist.add (ARDOUR::Properties::name, PBD::basename_nosuffix (src->name ()));
 		//printf(" : %d - trackname: (%s)\n", a->index, src->name ().c_str ());
 		boost::shared_ptr<Region> region = (RegionFactory::create (src, plist));
-		/* sets beat position */
-		region->set_position (pos.sample, pos.division);
-		midi_track->playlist ()->add_region (region, pos.sample, 1.0, false, pos.division);
+		/* sets position */
+		region->set_position (timepos_t (pos.sample));
+		midi_track->playlist ()->add_region (region, timepos_t (pos.sample), 1.0, false);
 
 		boost::shared_ptr<MidiRegion> mr = boost::dynamic_pointer_cast<MidiRegion>(region);
 		boost::shared_ptr<MidiModel> mm = mr->midi_source (0)->model ();
@@ -453,14 +456,15 @@ no_audio_tracks:
 
 		for (vector<PTFFormat::midi_ev_t>::const_iterator j = a->reg.midi.begin (); j != a->reg.midi.end (); ++j) {
 			//printf(" : MIDI : pos=%f len=%f\n", (float)j->pos / 960000., (float)j->length / 960000.);
-			Temporal::Beats start = (Temporal::Beats)(j->pos / 960000.);
-			Temporal::Beats len = (Temporal::Beats)(j->length / 960000.);
+			Temporal::Beats start = Temporal::Beats::from_double (j->pos / 960000.);
+			Temporal::Beats len = Temporal::Beats::from_double(j->length / 960000.);
 			/* PT C-2 = 0, Ardour C-1 = 0, subtract twelve to convert ? */
 			midicmd->add (boost::shared_ptr<Evoral::Note<Temporal::Beats> > (new Evoral::Note<Temporal::Beats> ((uint8_t)1, start, len, j->note, j->velocity)));
 		}
-		mm->apply_command (this, midicmd);
+		mm->apply_diff_command_only (*this, midicmd);
+		delete midicmd;
 		boost::shared_ptr<Region> copy (RegionFactory::create (mr, true));
 		playlist->clear_changes ();
-		playlist->add_region (copy, f);
+		playlist->add_region (copy, timepos_t (f));
 	}
 }

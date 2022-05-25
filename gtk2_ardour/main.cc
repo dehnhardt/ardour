@@ -121,11 +121,14 @@ gui_jack_error ()
 
 #ifndef NDEBUG
 static void ardour_g_log (const gchar *log_domain, GLogLevelFlags log_level, const gchar *message, gpointer user_data) {
+
+	g_log_default_handler (log_domain, log_level, message, NULL);
+
 	switch (log_level) {
 		case G_LOG_FLAG_FATAL:
-		case G_LOG_LEVEL_CRITICAL:
 			fatal << "g_log: " << message << endmsg;
 			break;
+		case G_LOG_LEVEL_CRITICAL:
 		case G_LOG_LEVEL_ERROR:
 			error << "g_log: " << message << endmsg;
 			break;
@@ -328,7 +331,7 @@ int main (int argc, char *argv[])
 	}
 
 	if (no_splash) {
-		cout << _("Copyright (C) 1999-2021 Paul Davis") << endl
+		cout << _("Copyright (C) 1999-2022 Paul Davis") << endl
 		     << _("Some portions Copyright (C) Steve Harris, Ari Johnson, Brett Viren, Joel Baker, Robin Gareus") << endl
 		     << endl
 		     << string_compose (_("%1 comes with ABSOLUTELY NO WARRANTY"), PROGRAM_NAME) << endl
@@ -414,9 +417,7 @@ int main (int argc, char *argv[])
 	}
 
 #ifndef NDEBUG
-	g_log_set_handler (NULL,
-			GLogLevelFlags (G_LOG_LEVEL_WARNING | G_LOG_FLAG_FATAL |  G_LOG_LEVEL_CRITICAL | G_LOG_FLAG_RECURSION),
-			&ardour_g_log, NULL);
+	g_log_set_default_handler (&ardour_g_log, NULL);
 #endif
 
 	ui->run (text_receiver);

@@ -146,7 +146,7 @@ public:
 	PBD::Signal2<void,bool,PBD::Controllable::GroupControlDisposition> Changed;
 
 	int set_state (const XMLNode&, int version);
-	virtual XMLNode& get_state ();
+	virtual XMLNode& get_state () const;
 
 	std::string name() const { return _name; }
 
@@ -168,6 +168,10 @@ public:
 
 	static boost::shared_ptr<Controllable> by_id (const PBD::ID&);
 	static void dump_registry ();
+
+
+	typedef std::set<boost::shared_ptr<Controllable>> ControllableSet;
+	static ControllableSet registered_controllables ();
 
 	static const std::string xml_node_name;
 

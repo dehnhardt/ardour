@@ -49,6 +49,7 @@ UI_CONFIG_VARIABLE (std::string, default_bindings, "default-bindings", "ardour")
 UI_CONFIG_VARIABLE (std::string, vkeybd_layout, "vkeybd-layout", "QWERTY Single")
 UI_CONFIG_VARIABLE (bool, only_copy_imported_files, "only-copy-imported-files", true)
 UI_CONFIG_VARIABLE (bool, autoplay_files, "autoplay-files", false)
+UI_CONFIG_VARIABLE (bool, autoplay_clips, "autoplay-clips", true)
 UI_CONFIG_VARIABLE (bool, default_narrow_ms, "default-narrow_ms", false)
 UI_CONFIG_VARIABLE (bool, name_new_markers, "name-new-markers", false)
 UI_CONFIG_VARIABLE (bool, rubberbanding_snaps_to_grid, "rubberbanding-snaps-to-grid", false)
@@ -76,7 +77,7 @@ UI_CONFIG_VARIABLE (bool, show_region_cue_markers, "show-region-cue-markers", tr
 UI_CONFIG_VARIABLE (bool, show_name_highlight, "show-name-highlight", false)
 UI_CONFIG_VARIABLE (ARDOUR::ClockDeltaMode, primary_clock_delta_mode, "primary-clock-delta-mode", NoDelta)
 UI_CONFIG_VARIABLE (ARDOUR::ClockDeltaMode, secondary_clock_delta_mode, "secondary-clock-delta-mode", NoDelta)
-UI_CONFIG_VARIABLE (uint64_t, clock_display_limit, "clock-display-limit", 2592000) /* seconds; default 30days (720h), 0 = unlimited */
+UI_CONFIG_VARIABLE (ARDOUR::samplecnt_t, clock_display_limit, "clock-display-limit", 8553600) /* seconds; default 99h, 0 = unlimited */
 UI_CONFIG_VARIABLE (bool, show_track_meters, "show-track-meters", true)
 UI_CONFIG_VARIABLE (bool, follow_edits, "follow-edits", false)
 UI_CONFIG_VARIABLE (bool, super_rapid_clock_update, "super-rapid-clock-update", false)
@@ -95,11 +96,11 @@ UI_CONFIG_VARIABLE (bool, show_toolbar_recpunch, "show-toolbar-recpunch", true)
 UI_CONFIG_VARIABLE (bool, show_toolbar_monitoring, "show-toolbar-monitoring", false) /* deprecated */
 UI_CONFIG_VARIABLE (bool, show_toolbar_selclock, "show-toolbar-selclock", false)
 UI_CONFIG_VARIABLE (bool, show_toolbar_latency, "show-toolbar-latency", false)
+UI_CONFIG_VARIABLE (bool, show_toolbar_cuectrl, "show-toolbar-cuectrl", true)
 UI_CONFIG_VARIABLE (bool, show_toolbar_monitor_info, "show-toolbar-monitor-info", false)
 UI_CONFIG_VARIABLE (bool, show_mini_timeline, "show-mini-timeline", true)
 UI_CONFIG_VARIABLE (bool, show_secondary_clock, "show-secondary-clock", true)
 UI_CONFIG_VARIABLE (double, waveform_clip_level, "waveform-clip-level", -0.0933967) /* units of dB */
-UI_CONFIG_VARIABLE (bool, hiding_groups_deactivates_groups, "hiding-groups-deactivates-groups", true)
 UI_CONFIG_VARIABLE (bool, no_new_session_dialog, "no-new-session-dialog", false)
 UI_CONFIG_VARIABLE (bool, buggy_gradients, "buggy-gradients", false)
 UI_CONFIG_VARIABLE (bool, cairo_image_surface, "cairo-image-surface", false)
@@ -133,3 +134,13 @@ UI_CONFIG_VARIABLE (bool, rulers_follow_grid, "rulers-follow-grid", false)
 UI_CONFIG_VARIABLE (bool, grid_follows_internal, "grid-follows-internal", false)  //this feature is deprecated, default it FALSE for now; remove it in v6
 UI_CONFIG_VARIABLE (bool, show_region_name, "show-region-name", true)
 UI_CONFIG_VARIABLE (int, time_axis_name_ellipsize_mode, "time-axis-name-ellipsize-mode", 0)
+UI_CONFIG_VARIABLE (bool, show_triggers_inline, "show-triggers-inline", false)
+UI_CONFIG_VARIABLE (bool, one_plugin_window_only, "one-plugin-window-only", false)
+UI_CONFIG_VARIABLE (int, default_lower_midi_note, "default-lower-midi-note", 60)
+UI_CONFIG_VARIABLE (int, default_upper_midi_note, "default-upper-midi-note", 71)
+UI_CONFIG_VARIABLE (bool, ask_before_closing_last_window, "ask-before-closing-last-window", true)
+UI_CONFIG_VARIABLE (std::string, freesound_dir, "freesound-dir", "")
+
+/* these are visibility-type selections in the New Track dialog that we should make persistent for the user's choices */
+UI_CONFIG_VARIABLE (bool, show_on_cue_page, "show-on-cue-page", true)
+UI_CONFIG_VARIABLE (uint32_t, insert_at_position, "insert-at-position", 3)

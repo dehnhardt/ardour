@@ -31,8 +31,8 @@
 namespace ArdourWaveView {
 
 WaveViewProperties::WaveViewProperties (boost::shared_ptr<ARDOUR::AudioRegion> region)
-    : region_start (region->start ())
-    , region_end (region->start () + region->length ())
+    : region_start (region->start_sample ())
+    , region_end (region->start_sample () + region->length_samples ())
     , channel (0)
     , height (64)
     , samples_per_pixel (0)
@@ -405,7 +405,7 @@ WaveViewDrawingThread::start ()
 {
 	assert (!_thread);
 
-	_thread = Glib::Threads::Thread::create (sigc::ptr_fun (&WaveViewThreads::thread_proc));
+	_thread = PBD::Thread::create (&WaveViewThreads::thread_proc);
 }
 
 void

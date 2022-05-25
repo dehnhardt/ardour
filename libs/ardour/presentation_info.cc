@@ -56,6 +56,7 @@ namespace ARDOUR {
 		PBD::PropertyDescriptor<bool>     selected;
 		PBD::PropertyDescriptor<uint32_t> order;
 		PBD::PropertyDescriptor<uint32_t> color;
+		PBD::PropertyDescriptor<bool>     trigger_track;
 	}
 }
 
@@ -120,6 +121,7 @@ const PresentationInfo::Flag PresentationInfo::AllRoutes = PresentationInfo::Fla
 const PresentationInfo::Flag PresentationInfo::MixerRoutes = PresentationInfo::Flag (PresentationInfo::Route|PresentationInfo::MasterOut|PresentationInfo::MonitorOut);
 const PresentationInfo::Flag PresentationInfo::AllStripables = PresentationInfo::Flag (PresentationInfo::AllRoutes|PresentationInfo::VCA);
 const PresentationInfo::Flag PresentationInfo::MixerStripables = PresentationInfo::Flag (PresentationInfo::MixerRoutes|PresentationInfo::VCA);
+const PresentationInfo::Flag PresentationInfo::MidiIndicatingFlags = PresentationInfo::Flag (PresentationInfo::MidiTrack|PresentationInfo::MidiBus);
 
 void
 PresentationInfo::make_property_quarks ()
@@ -156,7 +158,7 @@ PresentationInfo::PresentationInfo (PresentationInfo const& other)
 }
 
 XMLNode&
-PresentationInfo::get_state ()
+PresentationInfo::get_state () const
 {
 	XMLNode* node = new XMLNode (state_node_name);
 	node->set_property ("order", _order);
@@ -188,6 +190,9 @@ PresentationInfo::set_state (XMLNode const& node, int /* version */)
 	if (node.get_property (X_("flags"), f)) {
 		if ((f&Hidden) != (_flags&Hidden)) {
 			pc.add (Properties::hidden);
+		}
+		if ((f&TriggerTrack) != (_flags&TriggerTrack)) {
+			pc.add (Properties::trigger_track);
 		}
 		_flags = f;
 	}
@@ -284,6 +289,22 @@ PresentationInfo::set_order (order_t order)
 	}
 }
 
+void
+PresentationInfo::set_trigger_track (bool yn)
+{
+	if (yn != trigger_track ()) {
+
+		if (yn) {
+			_flags = Flag (_flags | TriggerTrack);
+		} else {
+			_flags = Flag (_flags & ~TriggerTrack);
+		}
+
+		send_change (PropertyChange (Properties::trigger_track));
+		send_static_change (PropertyChange (Properties::trigger_track));
+	}
+}
+
 PresentationInfo&
 PresentationInfo::operator= (PresentationInfo const& other)
 {
@@ -297,7 +318,7 @@ PresentationInfo::operator= (PresentationInfo const& other)
 }
 
 std::ostream&
-operator<<(std::ostream& o, ARDOUR::PresentationInfo const& pi)
+std::operator<<(std::ostream& o, ARDOUR::PresentationInfo const& pi)
 {
 	return o << pi.order() << '/' << enum_2_string (pi.flags()) << '/' << pi.color();
 }

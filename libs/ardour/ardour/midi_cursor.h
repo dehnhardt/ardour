@@ -35,23 +35,24 @@
 namespace ARDOUR {
 
 struct MidiCursor : public boost::noncopyable {
-	MidiCursor() : last_read_end(0) {}
+	MidiCursor()  {}
 
 	void connect(PBD::Signal1<void, bool>& invalidated) {
 		connections.drop_connections();
-		invalidated.connect_same_thread(
-			connections, boost::bind(&MidiCursor::invalidate, this, _1));
+		invalidated.connect_same_thread (connections, boost::bind(&MidiCursor::invalidate, this, _1));
 	}
 
+
 	void invalidate(bool preserve_notes) {
-		iter.invalidate(preserve_notes ? &active_notes : NULL);
-		last_read_end = 0;
+		iter.invalidate (preserve_notes);
+		/* maintain time domain while resetting to zero */
+		last_read_end = Temporal::timepos_t (last_read_end.time_domain());
 	}
 
 	Evoral::Sequence<Temporal::Beats>::const_iterator        iter;
 	std::set<Evoral::Sequence<Temporal::Beats>::WeakNotePtr> active_notes;
-	samplepos_t                                              last_read_end;
-	PBD::ScopedConnectionList                                connections;
+	timepos_t                                                last_read_end;
+ 	PBD::ScopedConnectionList                                connections;
 };
 
 }

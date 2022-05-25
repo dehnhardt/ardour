@@ -28,9 +28,9 @@ using namespace ARDOUR;
 using namespace std;
 using namespace PBD;
 
-SoloControl::SoloControl (Session& session, std::string const & name, Soloable& s, Muteable& m)
+SoloControl::SoloControl (Session& session, std::string const & name, Soloable& s, Muteable& m, Temporal::TimeDomain td)
 	: SlavableAutomationControl (session, SoloAutomation, ParameterDescriptor (SoloAutomation),
-	                             boost::shared_ptr<AutomationList>(new AutomationList(Evoral::Parameter(SoloAutomation))),
+	                             boost::shared_ptr<AutomationList>(new AutomationList(Evoral::Parameter(SoloAutomation), td)),
 	                             name)
 	, _soloable (s)
 	, _muteable (m)
@@ -248,7 +248,7 @@ SoloControl::set_state (XMLNode const & node, int version)
 }
 
 XMLNode&
-SoloControl::get_state ()
+SoloControl::get_state () const
 {
 	XMLNode& node (SlavableAutomationControl::get_state());
 

@@ -41,7 +41,7 @@ template <typename T> class MidiRingBuffer;
 class LIBARDOUR_API DiskReader : public DiskIOProcessor
 {
 public:
-	DiskReader (Session&, Track&, std::string const& name, DiskIOProcessor::Flag f = DiskIOProcessor::Flag (0));
+	DiskReader (Session&, Track&, std::string const& name, Temporal::TimeDomain, DiskIOProcessor::Flag f = DiskIOProcessor::Flag (0));
 	~DiskReader ();
 
 	bool set_name (std::string const& str);
@@ -73,7 +73,7 @@ public:
 
 	float buffer_load () const;
 
-	void move_processor_automation (boost::weak_ptr<Processor>, std::list<Evoral::RangeMove<samplepos_t> > const&);
+	void move_processor_automation (boost::weak_ptr<Processor>, std::list<Temporal::RangeMove> const&);
 
 	/* called by the Butler in a non-realtime context as part of its normal
 	 * buffer refill loop (not due to transport-mechanism requests like
@@ -146,12 +146,12 @@ protected:
 		bool        initialized;
 	};
 
-	XMLNode& state ();
+	XMLNode& state () const;
 
 	void resolve_tracker (Evoral::EventSink<samplepos_t>& buffer, samplepos_t time);
 
 	int  use_playlist (DataType, boost::shared_ptr<Playlist>);
-	void playlist_ranges_moved (std::list<Evoral::RangeMove<samplepos_t> > const&, bool);
+	void playlist_ranges_moved (std::list<Temporal::RangeMove> const&, bool);
 
 	int add_channel_to (boost::shared_ptr<ChannelList>, uint32_t how_many);
 
@@ -207,7 +207,7 @@ private:
 	DeclickAmp            _declick_amp;
 	sampleoffset_t        _declick_offs;
 	bool                  _declick_enabled;
-	MidiStateTracker      _tracker;
+	MidiNoteTracker      _tracker;
 	boost::optional<bool> _last_read_reversed;
 	boost::optional<bool> _last_read_loop;
 

@@ -105,7 +105,7 @@ PluginSelector::PluginSelector (PluginManager& mgr)
 	plugin_display.set_headers_clickable (true);
 	plugin_display.set_reorderable (false);
 	plugin_display.set_rules_hint (true);
-	plugin_display.add_object_drag (plugin_columns.plugin.index(), "PluginInfoPtr");
+	plugin_display.add_object_drag (plugin_columns.plugin.index(), "x-ardour/plugin.info");
 	plugin_display.set_drag_column (plugin_columns.name.index());
 
 	// setting a sort-column prevents re-ordering via Drag/Drop
@@ -169,10 +169,10 @@ PluginSelector::PluginSelector (PluginManager& mgr)
 	_search_ignore_checkbox->set_name ("pluginlist filter button");
 
 	Gtk::Label* search_help_label1 = manage (new Label(
-		_("All search terms must be matched."), Gtk::ALIGN_LEFT));
+		_("All search terms must be matched."), Gtk::ALIGN_START));
 
 	Gtk::Label* search_help_label2 = manage (new Label(
-		_("Ex: \"ess dyn\" will find \"dynamic de-esser\" but not \"de-esser\"."), Gtk::ALIGN_LEFT));
+		_("Ex: \"ess dyn\" will find \"dynamic de-esser\" but not \"de-esser\"."), Gtk::ALIGN_START));
 
 	search_table->attach (search_entry,            0, 3, 0, 1, FILL|EXPAND, FILL);
 	search_table->attach (search_clear_button,     3, 4, 0, 1, FILL, FILL);
@@ -270,13 +270,13 @@ PluginSelector::PluginSelector (PluginManager& mgr)
 	tag_reset_button->signal_clicked().connect (sigc::mem_fun (*this, &PluginSelector::tag_reset_button_clicked));
 
 	Gtk::Label* tagging_help_label1 = manage (new Label(
-		_("Enter space-separated, one-word Tags for the selected plugin."), Gtk::ALIGN_LEFT));
+		_("Enter space-separated, one-word Tags for the selected plugin."), Gtk::ALIGN_START));
 
 	Gtk::Label* tagging_help_label2 = manage (new Label(
-		_("You can include dashes, colons or underscores in a Tag."), Gtk::ALIGN_LEFT));
+		_("You can include dashes, colons or underscores in a Tag."), Gtk::ALIGN_START));
 
 	Gtk::Label* tagging_help_label3 = manage (new Label(
-		_("Ex: \"dynamic de-esser vocal\" applies 3 Tags."), Gtk::ALIGN_LEFT));
+		_("Ex: \"dynamic de-esser vocal\" applies 3 Tags."), Gtk::ALIGN_START));
 
 	int p = 0;
 	tagging_table->attach (*tag_entry,           0, 1, p, p+1, FILL|EXPAND, FILL);
@@ -916,7 +916,7 @@ PluginSelector::plugin_menu()
 void
 PluginSelector::build_plugin_menu ()
 {
-	if (is_visible ()) {
+	if (get_visible ()) {
 		_need_menu_rebuild = true;
 		return;
 	}

@@ -1790,7 +1790,6 @@ AlsaAudioBackend::get_buffer (PortEngine::PortHandle port_handle, pframes_t nfra
 {
 	BackendPortPtr port = boost::dynamic_pointer_cast<BackendPort> (port_handle);
 	assert (port);
-	assert (valid_port (port));
 	return port->get_buffer (nframes);
 }
 
@@ -2222,18 +2221,33 @@ AlsaAudioBackend::AudioSlave::update_latencies (uint32_t play, uint32_t capt)
 {
 	LatencyRange lr;
 	lr.min = lr.max = (capt);
+	bool changed = false;
 	for (std::vector<BackendPortPtr>::const_iterator it = inputs.begin (); it != inputs.end (); ++it) {
+		LatencyRange lx;
+		lx = (*it)->latency_range (false);
+		if (lr == lx) {
+			continue;
+		}
 		(*it)->set_latency_range (lr, false);
+		changed = true;
 	}
 
 	lr.min = lr.max = play;
 	for (std::vector<BackendPortPtr>::const_iterator it = outputs.begin (); it != outputs.end (); ++it) {
+		LatencyRange lx;
+		lx = (*it)->latency_range (true);
+		if (lr == lx) {
+			continue;
+		}
 		(*it)->set_latency_range (lr, true);
+		changed = true;
 	}
 #ifndef NDEBUG
-	printf ("ALSA SLAVE-device latency play=%d capt=%d\n", play, capt); // XXX DEBUG
+	printf ("ALSA SLAVE-device latency play=%d capt=%d changed:%d\n", play, capt, changed); // XXX DEBUG
 #endif
-	UpdateLatency (); /* EMIT SIGNAL */
+	if (changed) {
+		UpdateLatency (); /* EMIT SIGNAL */
+	}
 }
 
 /******************************************************************************/
@@ -2455,7 +2469,7 @@ AlsaDeviceReservation::acquire_device (const char* device_name)
 		return false;
 	}
 
-	/* wait to check if reservation suceeded. */
+	/* wait to check if reservation succeeded. */
 	int timeout = 500; // 5 sec
 	while (_device_reservation && !_reservation_succeeded && --timeout > 0) {
 		Glib::usleep (10000);

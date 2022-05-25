@@ -50,14 +50,19 @@ AudioRegionGainLine::AudioRegionGainLine (const string & name, AudioRegionView& 
 	// If this isn't true something is horribly wrong, and we'll get catastrophic gain values
 	assert(l->parameter().type() == EnvelopeAutomation);
 
-	_time_converter->set_origin_b (rv.region()->position());
-
 	r.region()->PropertyChanged.connect (_region_changed_connection, invalidator (*this), boost::bind (&AudioRegionGainLine::region_changed, this, _1), gui_context());
 
 	group->raise_to_top ();
 	group->set_y_position (2);
 	terminal_points_can_slide = false;
 }
+
+timepos_t
+AudioRegionGainLine::get_origin() const
+{
+	return rv.region()->position();
+}
+
 
 void
 AudioRegionGainLine::start_drag_single (ControlPoint* cp, double x, float fraction)
@@ -109,14 +114,6 @@ AudioRegionGainLine::region_changed (const PropertyChange& what_changed)
 {
 	PropertyChange interesting_stuff;
 
-	interesting_stuff.add (ARDOUR::Properties::start);
-	interesting_stuff.add (ARDOUR::Properties::position);
-
-	if (what_changed.contains (interesting_stuff)) {
-		_time_converter->set_origin_b (rv.region()->position());
-	}
-
-	interesting_stuff.clear ();
 	interesting_stuff.add (ARDOUR::Properties::start);
 	interesting_stuff.add (ARDOUR::Properties::length);
 

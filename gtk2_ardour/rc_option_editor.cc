@@ -50,8 +50,10 @@
 
 #include "ardour/audio_backend.h"
 #include "ardour/audioengine.h"
+#include "ardour/clip_library.h"
 #include "ardour/control_protocol_manager.h"
 #include "ardour/dB.h"
+#include "ardour/parameter_descriptor.h"
 #include "ardour/port_manager.h"
 #include "ardour/plugin_manager.h"
 #include "ardour/profile.h"
@@ -1306,26 +1308,25 @@ class BufferingOptions : public OptionEditorComponent
 		ComboBoxText  _buffering_presets_combo;
 };
 
-class LTCPortSelectOption : public OptionEditorComponent, public sigc::trackable
-{
+class PortSelectOption : public OptionEditorComponent, public sigc::trackable {
 public:
-	LTCPortSelectOption (RCConfiguration* c, SessionHandlePtr* shp)
-			: _rc_config (c)
-			, _shp (shp)
-			, _label (_("LTC Output Port:"))
-			, _ignore_change (false)
+	PortSelectOption (RCConfiguration* c, SessionHandlePtr* shp, std::string const & tooltip, std::string const & parameter_name, std::string const & label, DataType dt, PortFlags pf)
+		: _rc_config (c)
+                , _shp (shp)
+                , _label (label)
+                , _ignore_change (false)
+                , data_type (dt)
+                , port_flags (pf)
 	{
 		_store = ListStore::create (_port_columns);
 		_combo.set_model (_store);
 		_combo.pack_start (_port_columns.short_name);
 
-		set_tooltip (_combo, _("The LTC generator output will be auto-connected to this port when a session is loaded."));
+		set_tooltip (_combo, tooltip);
 
-		update_port_combo ();
-
-		_combo.signal_map ().connect (sigc::mem_fun (*this, &LTCPortSelectOption::on_map));
-		_combo.signal_unmap ().connect (sigc::mem_fun (*this, &LTCPortSelectOption::on_unmap));
-		_combo.signal_changed ().connect (sigc::mem_fun (*this, &LTCPortSelectOption::port_changed));
+		_combo.signal_map ().connect (sigc::mem_fun (*this, &PortSelectOption::on_map));
+		_combo.signal_unmap ().connect (sigc::mem_fun (*this, &PortSelectOption::on_unmap));
+		_combo.signal_changed ().connect (sigc::mem_fun (*this, &PortSelectOption::port_changed));
 	}
 
 	void add_to_page (OptionEditorPage* p)
@@ -1340,17 +1341,17 @@ public:
 
 	void parameter_changed (string const & p)
 	{
-		if (p == "ltc-output-port") {
+		if (p == parameter_name) {
 			update_selection ();
 		}
 	}
 
 	void set_state_from_config ()
 	{
-		parameter_changed ("ltc-output-port");
+		parameter_changed (parameter_name);
 	}
 
-private:
+protected:
 	struct PortColumns : public Gtk::TreeModel::ColumnRecord {
 		PortColumns() {
 			add (short_name);
@@ -1365,6 +1366,9 @@ private:
 	Label             _label;
 	Gtk::ComboBox     _combo;
 	bool              _ignore_change;
+	std::string        parameter_name;
+	ARDOUR::DataType   data_type;
+	ARDOUR::PortFlags  port_flags;
 	PortColumns       _port_columns;
 
 	Glib::RefPtr<Gtk::ListStore> _store;
@@ -1375,19 +1379,64 @@ private:
 		AudioEngine::instance()->PortRegisteredOrUnregistered.connect (
 				_engine_connection,
 				invalidator (*this),
-				boost::bind (&LTCPortSelectOption::update_port_combo, this),
+				boost::bind (&PortSelectOption::update_port_combo, this),
 				gui_context());
 
 		AudioEngine::instance()->PortPrettyNameChanged.connect (
 				_engine_connection,
 				invalidator (*this),
-				boost::bind (&LTCPortSelectOption::update_port_combo, this),
+				boost::bind (&PortSelectOption::update_port_combo, this),
 				gui_context());
 	}
 
 	void on_unmap ()
 	{
 		_engine_connection.drop_connections ();
+	}
+
+
+	void update_port_combo ()
+	{
+		vector<string> ports;
+		ARDOUR::AudioEngine::instance()->get_ports ("", data_type, port_flags, ports);
+
+		PBD::Unwinder<bool> uw (_ignore_change, true);
+		_store->clear ();
+
+		TreeModel::Row row;
+		row = *_store->append ();
+		row[_port_columns.full_name] = string();
+		row[_port_columns.short_name] = _("Disconnected");
+
+		for (vector<string>::const_iterator p = ports.begin(); p != ports.end(); ++p) {
+			row = *_store->append ();
+			row[_port_columns.full_name] = *p;
+			std::string pn = ARDOUR::AudioEngine::instance()->get_pretty_name_by_name (*p);
+			if (pn.empty ()) {
+				pn = (*p).substr ((*p).find (':') + 1);
+			}
+			row[_port_columns.short_name] = pn;
+		}
+
+		update_selection ();
+	}
+
+	virtual void update_selection() = 0;
+	virtual void port_changed () = 0;
+};
+
+class LTCPortSelectOption : public PortSelectOption
+{
+public:
+	LTCPortSelectOption (RCConfiguration* c, SessionHandlePtr* shp)
+		: PortSelectOption (c, shp,
+		                       _("The LTC generator output will be auto-connected to this port when a session is loaded."),
+		                       X_("ltc-output-port"),
+		                       _("LTC Output Port:"),
+		                       ARDOUR::DataType::AUDIO,
+		                       ARDOUR::PortFlags (ARDOUR::IsInput|ARDOUR::IsTerminal)) {
+		/* cannot call from parent due to the method being pure virtual */
+		update_port_combo ();
 	}
 
 	void port_changed ()
@@ -1414,32 +1463,6 @@ private:
 		if (!new_port.empty()) {
 			ltc_port->connect (new_port);
 		}
-	}
-
-	void update_port_combo ()
-	{
-		vector<string> ports;
-		ARDOUR::AudioEngine::instance()->get_ports ("", ARDOUR::DataType::AUDIO, ARDOUR::PortFlags (ARDOUR::IsInput|ARDOUR::IsTerminal), ports);
-
-		PBD::Unwinder<bool> uw (_ignore_change, true);
-		_store->clear ();
-
-		TreeModel::Row row;
-		row = *_store->append ();
-		row[_port_columns.full_name] = string();
-		row[_port_columns.short_name] = _("Disconnected");
-
-		for (vector<string>::const_iterator p = ports.begin(); p != ports.end(); ++p) {
-			row = *_store->append ();
-			row[_port_columns.full_name] = *p;
-			std::string pn = ARDOUR::AudioEngine::instance()->get_pretty_name_by_name (*p);
-			if (pn.empty ()) {
-				pn = (*p).substr ((*p).find (':') + 1);
-			}
-			row[_port_columns.short_name] = pn;
-		}
-
-		update_selection ();
 	}
 
 	void update_selection ()
@@ -1491,6 +1514,66 @@ private:
 			_combo.set_active (n);
 		}
 	}
+
+};
+
+class TriggerPortSelectOption : public PortSelectOption
+{
+public:
+	TriggerPortSelectOption (RCConfiguration* c, SessionHandlePtr* shp)
+		: PortSelectOption (c, shp,
+		                    _("TriggerBoxes will be connected to this port when it is set."),
+		                    X_("default-trigger-input-port"),
+		                    _("Default trigger input:"),
+		                    ARDOUR::DataType::MIDI,
+		                    ARDOUR::PortFlags (ARDOUR::IsOutput|ARDOUR::IsTerminal)) {
+		/* cannot call from parent due to the method being pure virtual */
+		update_port_combo ();
+	}
+
+	void port_changed ()
+	{
+		if (_ignore_change) {
+			return;
+		}
+		TreeModel::iterator active = _combo.get_active ();
+		string new_port = (*active)[_port_columns.full_name];
+		_rc_config->set_default_trigger_input_port (new_port);
+		/* everything that needs it will pick up the new port via ParameterChanged */
+	}
+
+	void update_selection ()
+	{
+		int n;
+		Gtk::TreeModel::Children children = _store->children();
+		Gtk::TreeModel::Children::iterator i = children.begin();
+		++i; /* skip "Disconnected" */
+
+		std::string const& pn = _rc_config->get_default_trigger_input_port ();
+		boost::shared_ptr<Port> port;
+
+		PBD::Unwinder<bool> uw (_ignore_change, true);
+
+		/* try match preference with available port-names */
+		for (n = 1;  i != children.end(); ++i, ++n) {
+			string port_name = (*i)[_port_columns.full_name];
+			if (port_name == pn) {
+				_combo.set_active (n);
+				return;
+			}
+		}
+
+		if (pn.empty ()) {
+			_combo.set_active (0); /* disconnected */
+		} else {
+			/* The port is currently not available, retain preference */
+			TreeModel::Row row = *_store->append ();
+			row[_port_columns.full_name] = pn;
+			row[_port_columns.short_name] = (pn).substr ((pn).find (':') + 1);
+			_combo.set_active (n);
+		}
+	}
+
 };
 
 class ControlSurfacesOptions : public OptionEditorMiniPage
@@ -1691,19 +1774,12 @@ class VideoTimelineOptions : public OptionEditorMiniPage
 	public:
 		VideoTimelineOptions (RCConfiguration* c)
 			: _rc_config (c)
-			, _show_video_export_info_button (_("Show Video Export Info before export"))
 			, _show_video_server_dialog_button (_("Show Video Server Startup Dialog"))
 			, _video_advanced_setup_button (_("Advanced Setup (remote video server)"))
 			, _xjadeo_browse_button (_("Browse..."))
 		{
 			Table* t = &table;
 			int n = table.property_n_rows();
-
-			t->attach (_show_video_export_info_button, 1, 4, n, n + 1);
-			_show_video_export_info_button.signal_toggled().connect (sigc::mem_fun (*this, &VideoTimelineOptions::show_video_export_info_toggled));
-			Gtkmm2ext::UI::instance()->set_tip (_show_video_export_info_button,
-					_("<b>When enabled</b> an information window with details is displayed before the video-export dialog."));
-			++n;
 
 			t->attach (_show_video_server_dialog_button, 1, 4, n, n + 1);
 			_show_video_server_dialog_button.signal_toggled().connect (sigc::mem_fun (*this, &VideoTimelineOptions::show_video_server_dialog_toggled));
@@ -1778,12 +1854,6 @@ class VideoTimelineOptions : public OptionEditorMiniPage
 			_rc_config->set_video_server_docroot (_video_server_docroot_entry.get_text());
 		}
 
-		void show_video_export_info_toggled ()
-		{
-			bool const x = _show_video_export_info_button.get_active ();
-			_rc_config->set_show_video_export_info (x);
-		}
-
 		void show_video_server_dialog_toggled ()
 		{
 			bool const x = _show_video_server_dialog_button.get_active ();
@@ -1826,9 +1896,6 @@ class VideoTimelineOptions : public OptionEditorMiniPage
 				_video_server_url_entry.set_text (_rc_config->get_video_server_url());
 			} else if (p == "video-server-docroot") {
 				_video_server_docroot_entry.set_text (_rc_config->get_video_server_docroot());
-			} else if (p == "show-video-export-info") {
-				bool const x = _rc_config->get_show_video_export_info();
-				_show_video_export_info_button.set_active (x);
 			} else if (p == "show-video-server-dialog") {
 				bool const x = _rc_config->get_show_video_server_dialog();
 				_show_video_server_dialog_button.set_active (x);
@@ -1847,7 +1914,6 @@ class VideoTimelineOptions : public OptionEditorMiniPage
 			parameter_changed ("video-server-url");
 			parameter_changed ("video-server-docroot");
 			parameter_changed ("video-monitor-setup-dialog");
-			parameter_changed ("show-video-export-info");
 			parameter_changed ("show-video-server-dialog");
 			parameter_changed ("video-advanced-setup");
 			parameter_changed ("xjadeo-binary");
@@ -1858,7 +1924,6 @@ class VideoTimelineOptions : public OptionEditorMiniPage
 		Entry _video_server_url_entry;
 		Entry _video_server_docroot_entry;
 		Entry _custom_xjadeo_path;
-		CheckButton _show_video_export_info_button;
 		CheckButton _show_video_server_dialog_button;
 		CheckButton _video_advanced_setup_button;
 		Button _xjadeo_browse_button;
@@ -1931,7 +1996,7 @@ class ColumVisibilityOption : public Option
 };
 
 
-/** A class which allows control of visibility of some editor components usign
+/** A class which allows control of visibility of some editor components using
  *  a VisibilityGroup.  The caller should pass in a `dummy' VisibilityGroup
  *  which has the correct members, but with null widget pointers.  This
  *  class allows the user to set visibility of the members, the details
@@ -2365,6 +2430,15 @@ RCOptionEditor::RCOptionEditor ()
 		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_only_copy_imported_files)
 		     ));
 
+
+	add_option (_("General"),
+			new DirectoryOption (
+				X_("freesound-dir"),
+				_("Cache Folder for downloaded Freesound clips:"),
+				sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_freesound_dir),
+				sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_freesound_dir)
+				));
+
 	add_option (_("General"), new OptionEditorHeading (_("Export")));
 
 	add_option (_("General"),
@@ -2731,6 +2805,8 @@ RCOptionEditor::RCOptionEditor ()
 	_mixer_strip_visibility.add (0, X_("Output"), _("Output"));
 	_mixer_strip_visibility.add (0, X_("Comments"), _("Comments"));
 	_mixer_strip_visibility.add (0, X_("VCA"), _("VCA Assigns"));
+	_mixer_strip_visibility.add (0, X_("TriggerGrid"), _("Trigger Grid"));
+	_mixer_strip_visibility.add (0, X_("TriggerMaster"), _("Trigger Masters"));
 
 #ifndef MIXBUS
 	add_option (_("Appearance/Mixer"),
@@ -2812,6 +2888,14 @@ RCOptionEditor::RCOptionEditor ()
 		     _("Display Monitor Section Info"),
 		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_show_toolbar_monitor_info),
 		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_show_toolbar_monitor_info)
+		     ));
+
+	add_option (_("Appearance/Toolbar"),
+	     new BoolOption (
+		     "show-toolbar-cuectrl",
+		     _("Display Cue Rec/Play Controls"),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_show_toolbar_cuectrl),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_show_toolbar_cuectrl)
 		     ));
 
 	add_option (_("Appearance/Toolbar"),
@@ -3234,6 +3318,15 @@ These settings will only take effect after %1 is restarted.\n\
 
 	add_option (_("Editor/Snap"),
 	     new BoolOption (
+		     "show-grid-rulers",
+		     _("Grid mode selection may change ruler visibility"),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_show_grids_ruler),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_show_grids_ruler)
+		     ));
+
+	// TODO toggle sensitivity of rulers-follow-grid when show-grid-rulers changes
+	add_option (_("Editor/Snap"),
+	     new BoolOption (
 		     "rulers-follow-grid",
 		     _("Rulers automatically change to follow the Grid mode selection"),
 		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_rulers_follow_grid),
@@ -3342,6 +3435,23 @@ These settings will only take effect after %1 is restarted.\n\
 
 	add_option (_("MIDI"), vkeybdlayout);
 
+	add_option (_("MIDI"), new OptionEditorHeading (_("Default Visible Note Range")));
+
+	const std::string legal_midi_name_chars = S_("legal characters for MIDI note names|ABCDEFG#1234567890");
+
+	mrl_option = new EntryOption ("lower-midi-note", _("Default lower visible MIDI note"),
+	                                           sigc::mem_fun (*this, &RCOptionEditor::get_default_lower_midi_note),
+	                                           sigc::mem_fun (*this, &RCOptionEditor::set_default_lower_midi_note));
+	mrl_option->set_valid_chars (legal_midi_name_chars);
+
+	mru_option = new EntryOption ("lower-midi-note", _("Default upper visible MIDI note"),
+	                                           sigc::mem_fun (*this, &RCOptionEditor::get_default_upper_midi_note),
+	                                           sigc::mem_fun (*this, &RCOptionEditor::set_default_upper_midi_note));
+	mru_option->set_valid_chars (legal_midi_name_chars);
+
+	add_option (_("MIDI"), mrl_option);
+	add_option (_("MIDI"), mru_option);
+
 	/* MIDI PORTs */
 	add_option (_("MIDI"), new OptionEditorHeading (_("MIDI Port Options")));
 
@@ -3369,7 +3479,7 @@ These settings will only take effect after %1 is restarted.\n\
 		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_name_new_markers)
 		);
 	add_option (_("Transport"), bo);
-	Gtkmm2ext::UI::instance()->set_tip (bo->tip_widget(), _("If enabled, popup a dialog when a new marker is created to allow its name to be set as it is created."
+	Gtkmm2ext::UI::instance()->set_tip (bo->tip_widget(), _("<b>When enabled</b>, popup a dialog when a new marker is created to allow its name to be set as it is created."
 								"\n\nYou can always rename markers by right-clicking on them."));
 
 	bo = new BoolOption (
@@ -3379,8 +3489,8 @@ These settings will only take effect after %1 is restarted.\n\
 		     sigc::mem_fun (*_rc_config, &RCConfiguration::set_stop_at_session_end)
 		     );
 	Gtkmm2ext::UI::instance()->set_tip (bo->tip_widget(),
-					    string_compose (_("<b>When enabled</b> if %1 is <b>not recording</b>, it will stop the transport "
-							      "when it reaches the current session end marker\n\n"
+					    string_compose (_("<b>When enabled</b> if %1 is <b>not recording</b>, and <b>all trigger-slots are unused</b> "
+							      "the transport is stopped when it reaches the current session end marker\n\n"
 							      "<b>When disabled</b> %1 will continue to roll past the session end marker at all times"),
 							    PROGRAM_NAME));
 	add_option (_("Transport"), bo);
@@ -3722,6 +3832,16 @@ These settings will only take effect after %1 is restarted.\n\
 	Gtkmm2ext::UI::instance()->set_tip (bo->tip_widget(),
 					    _("<b>When enabled</b> plugins will be activated when they are added to tracks/busses. When disabled plugins will be left inactive when they are added to tracks/busses"));
 
+	bo = new BoolOption (
+		"one-plugin-window-only",
+		_("Show only one plugin window at a time"),
+		sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_one_plugin_window_only),
+		sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_one_plugin_window_only)
+		);
+	add_option (_("Plugins"), bo);
+	Gtkmm2ext::UI::instance()->set_tip (bo->tip_widget(),
+					    _("<b>When enabled</b> at most one plugin GUI window can be on-screen at a time. <b>When disabled</b>, the number of visible plugin GUI windows is unlimited"));
+
 #if (defined WINDOWS_VST_SUPPORT || defined MACVST_SUPPORT || defined LXVST_SUPPORT || defined VST3_SUPPORT)
 	add_option (_("Plugins/VST"), new OptionEditorHeading (_("VST")));
 #if 0
@@ -3849,7 +3969,7 @@ These settings will only take effect after %1 is restarted.\n\
 				_("Additional VST3 Path:"));
 
 	vst3_path->set_note (_("Customizing VST3 paths is discouraged. Note that default VST3 paths as per "
-	                       "<a href=\"https://developer.steinberg.help/display/VST/Plug-in+Locations\">specification</a>"
+	                       "<a href=\"https://developer.steinberg.help/display/VST/Plug-in+Locations\">specification</a> "
 	                       "are always searched, and need not be explicitly set."));
 	add_option (_("Plugins/VST"), vst3_path);
 
@@ -3925,7 +4045,7 @@ These settings will only take effect after %1 is restarted.\n\
 	add_option (_("Plugins"),
 	     new BoolOption (
 		     "show-inline-display-by-default",
-		     _("Show Plugin Inline Display on Mixerstrip by default"),
+		     _("Show Plugin Inline Display on Mixer Strip by default"),
 		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_show_inline_display_by_default),
 		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_show_inline_display_by_default)
 		     ));
@@ -4594,6 +4714,32 @@ These settings will only take effect after %1 is restarted.\n\
 	add_option (_("Video"), new OptionEditorHeading (_("Video Server")));
 	add_option (_("Video"), new VideoTimelineOptions (_rc_config));
 
+	/* trigger launcing */
+
+	add_option (_("Triggering"), new OptionEditorHeading (_("Triggering")));
+
+	TriggerPortSelectOption* dtip  = new TriggerPortSelectOption (_rc_config, this);
+
+	set_tooltip (dtip->tip_widget(), _("If set, this identifies the input MIDI port that will be automatically connected to trigger boxes.\n\n"
+	                                   "It is intended to be connected to a NxN pad device (such as the Ableton Push 2 or Novation Launchpad)\n"
+	                                   "or a regular MIDI device capable of sending sequential note numbers (like a typical keyboard)"));
+	add_option (_("Triggering"), dtip);
+
+	add_option (_("Triggering"), new OptionEditorHeading (_("Clip Library")));
+
+	add_option (_("Triggering"), new DirectoryOption (
+			    X_("clip-library-dir"),
+			    _("User writable Clip Library:"),
+			    sigc::mem_fun (*_rc_config, &RCConfiguration::get_clip_library_dir),
+			    sigc::mem_fun (*_rc_config, &RCConfiguration::set_clip_library_dir)
+			    ));
+
+	add_option (_("Triggering"),
+			new RcActionButton (_("Reset Clip Library Dir"),
+				sigc::mem_fun (*this, &RCOptionEditor::reset_clip_library_dir)));
+
+	/* END OF SECTIONS/OPTIONS etc */
+
 	Widget::show_all ();
 
 	//trigger some parameter-changed messages which affect widget-visibility or -sensitivity
@@ -4665,6 +4811,11 @@ RCOptionEditor::parameter_changed (string const & p)
 	} else if (p == "conceal-vst2-if-vst3-exists") {
 		plugin_scan_refresh ();
 	}
+}
+
+void RCOptionEditor::reset_clip_library_dir () {
+	_rc_config->set_clip_library_dir ("@default@");
+	clip_library_dir (false);
 }
 
 void RCOptionEditor::show_audio_setup () {
@@ -4750,9 +4901,47 @@ RCOptionEditor::use_own_window (bool and_fill_it)
 }
 
 XMLNode&
-RCOptionEditor::get_state ()
+RCOptionEditor::get_state () const
 {
 	XMLNode* node = new XMLNode (X_("Preferences"));
 	node->add_child_nocopy (Tabbable::get_state());
 	return *node;
+}
+
+std::string
+RCOptionEditor::get_default_lower_midi_note ()
+{
+	return ParameterDescriptor::midi_note_name (UIConfiguration::instance().get_default_lower_midi_note());
+}
+
+bool
+RCOptionEditor::set_default_lower_midi_note (std::string str)
+{
+	int note = ParameterDescriptor::midi_note_num (str);
+
+	if (note < 0) {
+		mru_option->set_state_from_config ();
+		return false;
+	}
+
+	return UIConfiguration::instance().set_default_lower_midi_note (note);
+}
+
+std::string
+RCOptionEditor::get_default_upper_midi_note ()
+{
+	return ParameterDescriptor::midi_note_name (UIConfiguration::instance().get_default_upper_midi_note());
+}
+
+bool
+RCOptionEditor::set_default_upper_midi_note (std::string str)
+{
+	int note = ParameterDescriptor::midi_note_num (str);
+
+	if (note < 0) {
+		mru_option->set_state_from_config ();
+		return false;
+	}
+
+	return UIConfiguration::instance().set_default_upper_midi_note (note);
 }

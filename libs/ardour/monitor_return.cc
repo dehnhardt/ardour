@@ -26,8 +26,8 @@
 
 using namespace ARDOUR;
 
-MonitorReturn::MonitorReturn (Session& s)
-	: InternalReturn (s, "Monitor Return")
+MonitorReturn::MonitorReturn (Session& s, Temporal::TimeDomain td)
+	: InternalReturn (s, td, "Monitor Return")
 	, _nch (0)
 	, _gain (1.f)
 {
@@ -68,7 +68,7 @@ MonitorReturn::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_s
 }
 
 XMLNode&
-MonitorReturn::state ()
+MonitorReturn::state () const
 {
 	XMLNode& node (InternalReturn::state ());
 	node.set_property ("type", "monreturn");

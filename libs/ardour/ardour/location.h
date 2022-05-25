@@ -62,10 +62,11 @@ public:
 		IsSkipping = 0x100, /* skipping is active (or not) */
 		IsClockOrigin = 0x200,
 		IsXrun = 0x400,
+		IsCueMarker = 0x800,
 	};
 
 	Location (Session &);
-	Location (Session &, samplepos_t, samplepos_t, const std::string &, Flags bits = Flags(0), const uint32_t sub_num = 0);
+	Location (Session &, Temporal::timepos_t const &, Temporal::timepos_t const &, const std::string &, Flags bits = Flags(0), int32_t cue_id = 0);
 	Location (const Location& other);
 	Location (Session &, const XMLNode&);
 	Location* operator= (const Location& other);
@@ -77,15 +78,19 @@ public:
 	void unlock ();
 
 	int64_t timestamp() const { return _timestamp; };
-	samplepos_t start() const { return _start; }
-	samplepos_t end() const { return _end; }
-	samplecnt_t length() const { return _end - _start; }
+	timepos_t start() const { return _start; }
+	timepos_t end() const { return _end; }
+	timecnt_t length() const { return _start.distance (_end); }
 
-	int set_start (samplepos_t s, bool force = false, bool allow_beat_recompute = true, const uint32_t sub_num = 0);
-	int set_end (samplepos_t e, bool force = false, bool allow_beat_recompute = true, const uint32_t sub_num = 0);
-	int set (samplepos_t start, samplepos_t end, bool allow_beat_recompute = true, const uint32_t sub_num = 0);
+	samplepos_t start_sample() const  { return _start.samples(); }
+	samplepos_t end_sample() const { return _end.samples(); }
+	samplecnt_t length_samples() const { return _end.samples() - _start.samples(); }
 
-	int move_to (samplepos_t pos, const uint32_t sub_num);
+	int set_start (timepos_t const & s, bool force = false);
+	int set_end (timepos_t const & e, bool force = false);
+	int set (timepos_t const & start, timepos_t const & end);
+
+	int move_to (timepos_t const & pos);
 
 	const std::string& name() const { return _name; }
 	void set_name (const std::string &str);
@@ -94,6 +99,7 @@ public:
 	void set_auto_loop (bool yn, void *src);
 	void set_hidden (bool yn, void *src);
 	void set_cd (bool yn, void *src);
+	void set_cue (bool yn, void *src);
 	void set_is_range_marker (bool yn, void* src);
 	void set_is_clock_origin (bool yn, void* src);
 	void set_skip (bool yn);
@@ -104,6 +110,7 @@ public:
 	bool is_mark () const { return _flags & IsMark; }
 	bool is_hidden () const { return _flags & IsHidden; }
 	bool is_cd_marker () const { return _flags & IsCDMarker; }
+	bool is_cue_marker () const { return _flags & IsCueMarker; }
 	bool is_session_range () const { return _flags & IsSessionRange; }
 	bool is_range_marker() const { return _flags & IsRangeMarker; }
 	bool is_skip() const { return _flags & IsSkip; }
@@ -117,6 +124,9 @@ public:
 	boost::shared_ptr<SceneChange> scene_change() const { return _scene_change; }
 	void set_scene_change (boost::shared_ptr<SceneChange>);
 
+	int32_t cue_id() const { assert (is_cue_marker()); return _cue; }
+	void set_cue_id (int32_t);
+
 	/* these are static signals for objects that want to listen to all
 	 * locations at once.
 	 */
@@ -126,7 +136,7 @@ public:
 	static PBD::Signal1<void,Location*> start_changed;
 	static PBD::Signal1<void,Location*> flags_changed;
 	static PBD::Signal1<void,Location*> lock_changed;
-	static PBD::Signal1<void,Location*> position_lock_style_changed;
+	static PBD::Signal1<void,Location*> cue_change;
 
 	/* this is sent only when both start and end change at the same time */
 	static PBD::Signal1<void,Location*> changed;
@@ -138,42 +148,39 @@ public:
 	PBD::Signal0<void> Changed;
 
 	PBD::Signal0<void> NameChanged;
+	PBD::Signal0<void> CueChanged;
 	PBD::Signal0<void> EndChanged;
 	PBD::Signal0<void> StartChanged;
 	PBD::Signal0<void> FlagsChanged;
 	PBD::Signal0<void> LockChanged;
-	PBD::Signal0<void> PositionLockStyleChanged;
+	PBD::Signal0<void> TimeDomainChanged;
 
 	/* CD Track / CD-Text info */
 
 	std::map<std::string, std::string> cd_info;
-	XMLNode& cd_info_node (const std::string &, const std::string &);
+	static XMLNode& cd_info_node (const std::string &, const std::string &);
 
-	XMLNode& get_state (void);
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
-	PositionLockStyle position_lock_style() const { return _position_lock_style; }
-	void set_position_lock_style (PositionLockStyle ps);
-	void recompute_samples_from_beat ();
+	Temporal::TimeDomain position_time_domain() const { return _start.time_domain(); }
+	void set_position_time_domain (Temporal::TimeDomain ps);
 
 	static PBD::Signal0<void> scene_changed; /* for use by backend scene change management, class level */
 	PBD::Signal0<void> SceneChangeChanged;   /* for use by objects interested in this object */
 
 private:
 	std::string        _name;
-	samplepos_t        _start;
-	double             _start_beat;
-	samplepos_t        _end;
-	double             _end_beat;
+	timepos_t          _start;
+	timepos_t          _end;
 	Flags              _flags;
 	bool               _locked;
-	PositionLockStyle  _position_lock_style;
 	boost::shared_ptr<SceneChange> _scene_change;
 	int64_t            _timestamp;
+	int32_t            _cue;
 
 	void set_mark (bool yn);
 	bool set_flag_internal (bool yn, Flags flag);
-	void recompute_beat_from_samples (const uint32_t sub_num);
 };
 
 /** A collection of session locations including unique dedicated locations (loop, punch, etc) */
@@ -197,7 +204,7 @@ public:
 	 *
 	 * @return New location object
 	 */
-	Location* add_range (samplepos_t start, samplepos_t end);
+	Location* add_range (timepos_t const & start, timepos_t const & end);
 
 	void remove (Location *);
 	bool clear ();
@@ -205,9 +212,11 @@ public:
 	bool clear_xrun_markers ();
 	bool clear_ranges ();
 
-	void ripple (samplepos_t at, samplecnt_t distance, bool include_locked, bool notify);
+	void clear_cue_markers (samplepos_t start, samplepos_t end);
 
-	XMLNode& get_state (void);
+	void ripple (timepos_t const & at, timecnt_t const & distance, bool include_locked, bool notify);
+
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 	Location *get_location_by_id(PBD::ID);
 
@@ -222,14 +231,14 @@ public:
 	int set_current (Location *, bool want_lock = true);
 	Location *current () const { return current_location; }
 
-	Location* mark_at (samplepos_t, samplecnt_t slop = 0) const;
+	Location* mark_at (timepos_t const &, timecnt_t const & slop = timecnt_t::zero (Temporal::AudioTime)) const;
 
 	void set_clock_origin (Location*, void *src);
 
-	samplepos_t first_mark_before (samplepos_t, bool include_special_ranges = false);
-	samplepos_t first_mark_after (samplepos_t, bool include_special_ranges = false);
+	timepos_t first_mark_before (timepos_t const &, bool include_special_ranges = false);
+	timepos_t first_mark_after (timepos_t const &, bool include_special_ranges = false);
 
-	void marks_either_side (samplepos_t const, samplepos_t &, samplepos_t &) const;
+	void marks_either_side (timepos_t const &, timepos_t &, timepos_t &) const;
 
 	/** Return range with closest start pos to the where argument
 	 *
@@ -239,9 +248,9 @@ public:
 	 *
 	 * @return Location object or nil
 	 */
-	Location* range_starts_at(samplepos_t pos, samplecnt_t slop = 0, bool incl = false) const;
+	Location* range_starts_at (timepos_t const &, timecnt_t const & slop = timecnt_t (Temporal::AudioTime), bool incl = false) const;
 
-	void find_all_between (samplepos_t start, samplepos_t, LocationList&, Location::Flags);
+	void find_all_between (timepos_t const & start, timepos_t const & end, LocationList&, Location::Flags);
 
 	PBD::Signal1<void,Location*> current_changed;
 

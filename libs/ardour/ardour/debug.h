@@ -75,6 +75,7 @@ namespace PBD {
 		LIBARDOUR_API extern DebugBits MidiRingBuffer;
 		LIBARDOUR_API extern DebugBits MidiSourceIO;
 		LIBARDOUR_API extern DebugBits MidiTrackers;
+		LIBARDOUR_API extern DebugBits MidiTriggers;
 		LIBARDOUR_API extern DebugBits Monitor;
 		LIBARDOUR_API extern DebugBits OrderKeys;
 		LIBARDOUR_API extern DebugBits Panning;
@@ -89,7 +90,6 @@ namespace PBD {
 		LIBARDOUR_API extern DebugBits Selection;
 		LIBARDOUR_API extern DebugBits SessionEvents;
 		LIBARDOUR_API extern DebugBits Slave;
-		LIBARDOUR_API extern DebugBits SnapBBT;
 		LIBARDOUR_API extern DebugBits Solo;
 		LIBARDOUR_API extern DebugBits Soundcloud;
 		LIBARDOUR_API extern DebugBits TFSMEvents;
@@ -97,7 +97,9 @@ namespace PBD {
 		LIBARDOUR_API extern DebugBits TXLTC;
 		LIBARDOUR_API extern DebugBits TempoMap;
 		LIBARDOUR_API extern DebugBits TempoMath;
+		LIBARDOUR_API extern DebugBits TopologyTiming;
 		LIBARDOUR_API extern DebugBits Transport;
+		LIBARDOUR_API extern DebugBits Triggers;
 		LIBARDOUR_API extern DebugBits US2400;
 		LIBARDOUR_API extern DebugBits VCA;
 		LIBARDOUR_API extern DebugBits VST3Callbacks;
@@ -105,6 +107,7 @@ namespace PBD {
 		LIBARDOUR_API extern DebugBits VST3Process;
 		LIBARDOUR_API extern DebugBits VSTCallbacks;
 		LIBARDOUR_API extern DebugBits WiimoteControl;
+		LIBARDOUR_API extern DebugBits Freesound;
 
 	}
 }

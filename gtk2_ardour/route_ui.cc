@@ -142,6 +142,7 @@ RouteUI::RouteUI (ARDOUR::Session* sess)
 	}
 
 	if (sess) {
+		assert (_session);
 		init ();
 	}
 }
@@ -415,8 +416,12 @@ RouteUI::set_route (boost::shared_ptr<Route> rp)
 		update_monitoring_display ();
 	}
 
-	mute_button->unset_flags (Gtk::CAN_FOCUS);
-	solo_button->unset_flags (Gtk::CAN_FOCUS);
+	if (_route->triggerbox ()) {
+		_route->triggerbox ()->EmptyStatusChanged.connect (route_connections, invalidator (*this), boost::bind (&RouteUI::update_monitoring_display, this), gui_context());
+	}
+
+	mute_button->set_can_focus (false);
+	solo_button->set_can_focus (false);
 
 	mute_button->show();
 
@@ -533,7 +538,7 @@ RouteUI::mute_press (GdkEventButton* ev)
 					}
 
 					boost::shared_ptr<MuteControl> mc = _route->mute_control();
-					mc->start_touch (_session->audible_sample ());
+					mc->start_touch (timepos_t (_session->audible_sample ()));
 					_session->set_controls (route_list_to_control_list (rl, &Stripable::mute_control), _route->muted_by_self() ? 0.0 : 1.0, Controllable::InverseGroup);
 				}
 
@@ -549,7 +554,7 @@ RouteUI::mute_press (GdkEventButton* ev)
 				}
 
 				boost::shared_ptr<MuteControl> mc = _route->mute_control();
-				mc->start_touch (_session->audible_sample ());
+				mc->start_touch (timepos_t (_session->audible_sample ()));
 				mc->set_value (!_route->muted_by_self(), Controllable::UseGroup);
 			}
 		}
@@ -567,7 +572,7 @@ RouteUI::mute_release (GdkEventButton* /*ev*/)
 		_mute_release = 0;
 	}
 
-	_route->mute_control()->stop_touch (_session->audible_sample ());
+	_route->mute_control()->stop_touch (timepos_t (_session->audible_sample ()));
 
 	return false;
 }
@@ -588,7 +593,7 @@ RouteUI::edit_output_configuration ()
 
 	IOSelectorWindow* w = output_selectors[id];
 
-	if (w->is_visible()) {
+	if (w->get_visible()) {
 		w->get_toplevel()->get_window()->raise();
 	} else {
 		w->present ();
@@ -606,7 +611,7 @@ RouteUI::edit_input_configuration ()
 
 	IOSelectorWindow* w = input_selectors[_route->id ()];
 
-	if (w->is_visible()) {
+	if (w->get_visible()) {
 		w->get_toplevel()->get_window()->raise();
 	} else {
 		w->present ();
@@ -630,8 +635,8 @@ RouteUI::solo_press(GdkEventButton* ev)
 
 	if (Keyboard::is_context_menu_event (ev)) {
 
-		if (! (solo_isolated_led && solo_isolated_led->is_visible()) ||
-		    ! (solo_safe_led && solo_safe_led->is_visible())) {
+		if (! (solo_isolated_led && solo_isolated_led->get_visible()) ||
+		    ! (solo_safe_led && solo_safe_led->get_visible())) {
 
 			if (solo_menu == 0) {
 				build_solo_menu ();
@@ -1746,7 +1751,7 @@ RouteUI::route_rename ()
 void
 RouteUI::toggle_comment_editor ()
 {
-	if (_comment_window && _comment_window->is_visible ()) {
+	if (_comment_window && _comment_window->get_visible ()) {
 		_comment_window->hide ();
 	} else {
 		open_comment_editor ();
@@ -1815,7 +1820,11 @@ RouteUI::set_route_active (bool a, bool apply_to_selection)
 {
 	if (apply_to_selection) {
 		ARDOUR_UI::instance()->the_editor().get_selection().tracks.foreach_route_ui (boost::bind (&RouteUI::set_route_active, _1, a, false));
-	} else {
+	} else if (!is_master ()
+#ifdef MIXBUS
+		         && !_route->mixbus()
+#endif
+			) {
 		_route->set_active (a, this);
 	}
 }
@@ -1933,7 +1942,7 @@ RouteUI::save_as_template_dialog_response (int response, SaveTemplateDialog* d)
 	if (response == RESPONSE_ACCEPT) {
 		const string name = d->get_template_name ();
 		const string desc = d->get_description ();
-		const string path = Glib::build_filename(ARDOUR::user_route_template_directory (), name + ARDOUR::template_suffix);
+		const string path = Glib::build_filename(ARDOUR::user_route_template_directory (), legalize_for_path (name) + ARDOUR::template_suffix);
 
 		if (Glib::file_test (path, Glib::FILE_TEST_EXISTS)) { /* file already exists. */
 			bool overwrite = overwrite_file_dialog (*d,
@@ -2017,6 +2026,8 @@ RouteUI::parameter_changed (string const & p)
 	} else if (p == "session-monitoring") {
 		update_monitoring_display ();
 	} else if (p == "auto-input") {
+		update_monitoring_display ();
+	} else if (p == "triggerbox-overrides-disk-monitoring") {
 		update_monitoring_display ();
 	} else if (p == "layered-record-mode") {
 		update_monitoring_display ();
@@ -2253,6 +2264,23 @@ RouteUI::route_group() const
 	return _route->route_group();
 }
 
+void
+RouteUI::help_count_plugins (boost::weak_ptr<Processor> p, uint32_t* plugin_insert_cnt)
+{
+	boost::shared_ptr<Processor> processor (p.lock ());
+	if (!processor || !processor->display_to_user()) {
+		return;
+	}
+	boost::shared_ptr<PluginInsert> pi = boost::dynamic_pointer_cast<PluginInsert> (processor);
+#ifdef MIXBUS
+	if (pi && pi->is_channelstrip ()) {
+		return;
+	}
+#endif
+	if (pi) {
+		++(*plugin_insert_cnt);
+	}
+}
 
 RoutePinWindowProxy::RoutePinWindowProxy(std::string const &name, boost::shared_ptr<ARDOUR::Route> route)
 	: WM::ProxyBase (name, string())

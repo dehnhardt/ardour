@@ -278,6 +278,7 @@ public:
 	void add_to_page (OptionEditorPage*);
 	void set_sensitive (bool);
 	void set_invalid_chars (std::string i) { _invalid = i; }
+	void set_valid_chars (std::string i) { _valid = i; }
 
 	Gtk::Widget& tip_widget() { return *_entry; }
 
@@ -291,6 +292,7 @@ private:
 	Gtk::Label* _label; ///< UI label
 	Gtk::Entry* _entry; ///< UI entry
 	std::string _invalid;
+	std::string _valid;
 };
 
 
@@ -347,7 +349,7 @@ public:
 	void add (T e, std::string const & o)
 	{
 		_options.push_back (e);
-		_combo->append_text (o);
+		_combo->append (o);
 		/* Remove excess space.
 		 * gtk_combo_box_size_requet() does the following:
 		 * {
@@ -366,7 +368,7 @@ public:
 
 	void clear ()
 	{
-		_combo->clear_items();
+		_combo->remove_all();
 		_options.clear ();
 	}
 
@@ -656,6 +658,7 @@ private:
 	sigc::slot<std::string> _get; ///< slot to get the configuration variable's value
 	sigc::slot<bool, std::string> _set;  ///< slot to set the configuration variable's value
 	Gtk::FileChooserButton _file_chooser;
+	sigc::connection _changed_connection;
 };
 
 /** Class to represent a single page in an OptionEditor's notebook.

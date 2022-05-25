@@ -49,6 +49,7 @@
 #include "ardour/audio_port.h"
 #include "ardour/audio_track.h"
 #include "ardour/midi_track.h"
+#include "ardour/mixer_scene.h"
 #include "ardour/monitor_control.h"
 #include "ardour/panner_shell.h"
 #include "ardour/plugin_manager.h"
@@ -147,7 +148,7 @@ Mixer_UI::Mixer_UI ()
 	scroller.set_can_default (true);
 	// set_default (scroller);
 
-	scroller_base.set_flags (Gtk::CAN_FOCUS);
+	scroller_base.set_can_focus ();
 	scroller_base.add_events (Gdk::BUTTON_PRESS_MASK|Gdk::BUTTON_RELEASE_MASK);
 	scroller_base.set_name ("MixerWindow");
 	scroller_base.signal_button_press_event().connect (sigc::mem_fun(*this, &Mixer_UI::strip_scroller_button_event));
@@ -155,14 +156,15 @@ Mixer_UI::Mixer_UI ()
 
 	/* set up drag-n-drop */
 	vector<TargetEntry> target_table;
-	target_table.push_back (TargetEntry ("PluginFavoritePtr"));
+	target_table.push_back (TargetEntry ("x-ardour/plugin.favorite", Gtk::TARGET_SAME_APP));
 	scroller_base.drag_dest_set (target_table);
 	scroller_base.signal_drag_data_received().connect (sigc::mem_fun(*this, &Mixer_UI::scroller_drag_data_received));
 
 	/* add as last item of strip packer */
 	strip_packer.pack_end (scroller_base, true, true);
 	scroller_base.set_size_request (PX_SCALE (20), -1);
-	scroller_base.signal_expose_event().connect (sigc::bind (sigc::ptr_fun(&ArdourWidgets::ArdourIcon::expose), &scroller_base, ArdourWidgets::ArdourIcon::ShadedPlusSign));
+	scroller_base.signal_expose_event ().connect (sigc::bind (sigc::ptr_fun (&ArdourWidgets::ArdourIcon::expose_with_text), &scroller_base, ArdourWidgets::ArdourIcon::ShadedPlusSign,
+			_("Right-click or Double-click here\nto add Track, Bus, or VCA channels")));
 
 #ifdef MIXBUS
 	/* create a drop-shadow at the end of the mixer strips */
@@ -229,7 +231,7 @@ Mixer_UI::Mixer_UI ()
 	group_display_frame.add (group_display_vbox);
 
 	list<TargetEntry> target_list;
-	target_list.push_back (TargetEntry ("PluginPresetPtr"));
+	target_list.push_back (TargetEntry ("x-ardour/plugin.preset", Gtk::TARGET_SAME_APP));
 
 	favorite_plugins_model = PluginTreeStore::create (favorite_plugins_columns);
 	favorite_plugins_display.set_model (favorite_plugins_model);
@@ -240,7 +242,7 @@ Mixer_UI::Mixer_UI ()
 	favorite_plugins_display.set_headers_visible (false);
 	favorite_plugins_display.set_rules_hint (true);
 	favorite_plugins_display.set_can_focus (false);
-	favorite_plugins_display.add_object_drag (favorite_plugins_columns.plugin.index(), "PluginFavoritePtr");
+	favorite_plugins_display.add_object_drag (favorite_plugins_columns.plugin.index(), "x-ardour/plugin.favorite", Gtk::TARGET_SAME_APP);
 	favorite_plugins_display.set_drag_column (favorite_plugins_columns.name.index());
 	favorite_plugins_display.add_drop_targets (target_list);
 	favorite_plugins_display.signal_row_activated().connect (sigc::mem_fun (*this, &Mixer_UI::plugin_row_activated));
@@ -255,9 +257,9 @@ Mixer_UI::Mixer_UI ()
 	favorite_plugins_model->signal_row_has_child_toggled().connect (sigc::mem_fun (*this, &Mixer_UI::sync_treeview_favorite_ui_state));
 	favorite_plugins_model->signal_row_deleted().connect (sigc::mem_fun (*this, &Mixer_UI::favorite_plugins_deleted));
 
-	favorite_plugins_mode_combo.append_text (_("Favorite Plugins"));
-	favorite_plugins_mode_combo.append_text (_("Recent Plugins"));
-	favorite_plugins_mode_combo.append_text (_("Top-10 Plugins"));
+	favorite_plugins_mode_combo.append (_("Favorite Plugins"));
+	favorite_plugins_mode_combo.append (_("Recent Plugins"));
+	favorite_plugins_mode_combo.append (_("Top-10 Plugins"));
 	favorite_plugins_mode_combo.set_active_text (_("Favorite Plugins"));
 	favorite_plugins_mode_combo.signal_changed().connect (sigc::mem_fun (*this, &Mixer_UI::plugin_list_mode_changed));
 
@@ -312,28 +314,10 @@ Mixer_UI::Mixer_UI ()
 	list_hpane.add (global_hpacker);
 	list_hpane.set_child_minsize (list_vpacker, 30);
 
-	XMLNode const * settings = ARDOUR_UI::instance()->mixer_settings();
-	float fract;
-
-	if (!settings || !settings->get_property ("mixer-rhs-pane1-pos", fract) || fract > 1.0) {
-		fract = 0.6f;
-	}
-	rhs_pane1.set_divider (0, fract);
-
-	if (!settings || !settings->get_property ("mixer-rhs-pane2-pos", fract) || fract > 1.0) {
-		fract = 0.7f;
-	}
-	rhs_pane2.set_divider (0, fract);
-
-	if (!settings || !settings->get_property ("mixer-list-hpane-pos", fract) || fract > 1.0) {
-		fract = 0.2f;
-	}
-	list_hpane.set_divider (0, fract);
-
-	if (!settings || !settings->get_property ("mixer-inner-pane-pos", fract) || fract > 1.0) {
-		fract = 0.8f;
-	}
-	inner_pane.set_divider (0, fract);
+	rhs_pane1.set_divider (0, .6);
+	rhs_pane2.set_divider (0, .7);
+	list_hpane.set_divider (0, .2);
+	inner_pane.set_divider (0, .8);
 
 	rhs_pane1.set_drag_cursor (*PublicEditor::instance().cursors()->expand_up_down);
 	rhs_pane2.set_drag_cursor (*PublicEditor::instance().cursors()->expand_up_down);
@@ -802,7 +786,6 @@ Mixer_UI::sync_presentation_info_from_treeview ()
 	DEBUG_TRACE (DEBUG::OrderKeys, "mixer sync presentation info from treeview\n");
 
 	TreeModel::Children::iterator ri;
-	bool change = false;
 
 	PresentationInfo::order_t master_key = _session->master_order_key ();
 	PresentationInfo::order_t order = 0;
@@ -828,26 +811,16 @@ Mixer_UI::sync_presentation_info_from_treeview ()
 		}
 #endif
 
-		stripable->presentation_info().set_hidden (!visible);
-
 		// leave master where it is.
 		if (order == master_key) {
 			++order;
 		}
 
-		if (order != stripable->presentation_info().order()) {
-			stripable->set_presentation_order (order);
-			change = true;
-		}
+		stripable->presentation_info().set_hidden (!visible);
+		stripable->set_presentation_order (order);
 		++order;
 	}
 
-	change |= _session->ensure_stripable_sort_order ();
-
-	if (change) {
-		DEBUG_TRACE (DEBUG::OrderKeys, "... notify PI change from mixer GUI\n");
-		_session->set_dirty();
-	}
 }
 
 void
@@ -984,7 +957,7 @@ Mixer_UI::fan_out (boost::weak_ptr<Route> wr, bool to_busses, bool group)
 
 	boost::shared_ptr<AutomationControl> msac = route->master_send_enable_controllable ();
 	if (msac) {
-		msac->start_touch (msac->session().transport_sample());
+		msac->start_touch (timepos_t (msac->session().transport_sample()));
 		msac->set_value (0, PBD::Controllable::NoGroup);
 	}
 
@@ -1396,7 +1369,7 @@ Mixer_UI::stop_updating ()
 void
 Mixer_UI::fast_update_strips ()
 {
-	if (_content.is_mapped () && _session) {
+	if (_content.get_mapped () && _session) {
 		for (list<MixerStrip *>::iterator i = strips.begin(); i != strips.end(); ++i) {
 			(*i)->fast_update ();
 		}
@@ -1558,11 +1531,13 @@ Mixer_UI::track_list_delete (const Gtk::TreeModel::Path&)
 	*/
 
 	DEBUG_TRACE (DEBUG::OrderKeys, "mixer UI treeview row deleted\n");
-	sync_presentation_info_from_treeview ();
 
 	if (_route_deletion_in_progress) {
 		redisplay_track_list ();
+	} else {
+		sync_presentation_info_from_treeview ();
 	}
+
 }
 
 void
@@ -1682,7 +1657,8 @@ Mixer_UI::redisplay_track_list ()
 
 	vca_hpacker.pack_end (vca_scroller_base, true, true);
 	vca_scroller_base.set_size_request (PX_SCALE (20), -1);
-	vca_scroller_base.signal_expose_event().connect (sigc::bind (sigc::ptr_fun(&ArdourWidgets::ArdourIcon::expose), &vca_scroller_base, ArdourWidgets::ArdourIcon::ShadedPlusSign));
+	vca_scroller_base.signal_expose_event ().connect (sigc::bind (sigc::ptr_fun (&ArdourWidgets::ArdourIcon::expose_with_text), &vca_scroller_base, ArdourWidgets::ArdourIcon::ShadedPlusSign,
+			_("Right-click or Double-click here\nto add Track, Bus, or VCA channels")));
 	vca_scroller_base.show();
 
 	for (i = rows.begin(); i != rows.end(); ++i) {
@@ -2406,7 +2382,7 @@ Mixer_UI::strip_scroller_button_event (GdkEventButton* ev)
 void
 Mixer_UI::scroller_drag_data_received (const Glib::RefPtr<Gdk::DragContext>& context, int x, int y, const Gtk::SelectionData& data, guint info, guint time)
 {
-	if (data.get_target() != "PluginFavoritePtr") {
+	if (data.get_target() != "x-ardour/plugin.favorite") {
 		context->drag_finish (false, false, time);
 		return;
 	}
@@ -2427,7 +2403,7 @@ Mixer_UI::scroller_drag_data_received (const Glib::RefPtr<Gdk::DragContext>& con
 		if (!pip->is_instrument ()) {
 			continue;
 		}
-		ARDOUR_UI::instance()->session_add_midi_route (true, (RouteGroup*) 0, 1, _("MIDI"), Config->get_strict_io (), pip, ppp->_preset.valid ? &ppp->_preset : 0, PresentationInfo::max_order);
+		ARDOUR_UI::instance()->session_add_midi_route (true, (RouteGroup*) 0, 1, _("MIDI"), Config->get_strict_io (), pip, ppp->_preset.valid ? &ppp->_preset : 0, PresentationInfo::max_order, false);
 		ok = true;
 	}
 
@@ -2535,6 +2511,27 @@ Mixer_UI::set_state (const XMLNode& node, int version)
 		sync_treeview_from_favorite_order ();
 	}
 
+	float fract;
+	if (!node.get_property ("mixer-rhs-pane1-pos", fract) || fract > 1.0) {
+		fract = 0.6f;
+	}
+	rhs_pane1.set_divider (0, fract);
+
+	if (!node.get_property ("mixer-rhs-pane2-pos", fract) || fract > 1.0) {
+		fract = 0.7f;
+	}
+	rhs_pane2.set_divider (0, fract);
+
+	if (!node.get_property ("mixer-list-hpane-pos", fract) || fract > 1.0) {
+		fract = 0.2f;
+	}
+	list_hpane.set_divider (0, fract);
+
+	if (!node.get_property ("mixer-inner-pane-pos", fract) || fract > 1.0) {
+		fract = 0.8f;
+	}
+	inner_pane.set_divider (0, fract);
+
 	return 0;
 }
 
@@ -2568,7 +2565,7 @@ Mixer_UI::save_plugin_order_file ()
 }
 
 XMLNode&
-Mixer_UI::get_state ()
+Mixer_UI::get_state () const
 {
 	XMLNode* node = new XMLNode (X_("Mixer"));
 
@@ -3413,7 +3410,7 @@ Mixer_UI::add_favorite_processor (ARDOUR::PluginPresetPtr ppp, ProcessorPosition
 		}
 
 		Route::ProcessorStreams err;
-		boost::shared_ptr<Processor> processor (new PluginInsert (*_session, p));
+		boost::shared_ptr<Processor> processor (new PluginInsert (*_session, rt->time_domain(), p));
 
 		switch (pos) {
 			case AddTop:
@@ -3490,7 +3487,7 @@ Mixer_UI::plugin_drag_motion (const Glib::RefPtr<Gdk::DragContext>& ctx, int x, 
 			ctx->drag_status (Gdk::ACTION_MOVE, time);
 			return true;
 		}
-	} else if (target == "PluginPresetPtr") {
+	} else if (target == "x-ardour/plugin.preset") {
 		ctx->drag_status (Gdk::ACTION_COPY, time);
 		//favorite_plugins_mode_combo.set_active_text (_("Favorite Plugins"));
 		return true;
@@ -3503,7 +3500,7 @@ Mixer_UI::plugin_drag_motion (const Glib::RefPtr<Gdk::DragContext>& ctx, int x, 
 void
 Mixer_UI::plugin_drop (const Glib::RefPtr<Gdk::DragContext>&, const Gtk::SelectionData& data)
 {
-	if (data.get_target() != "PluginPresetPtr") {
+	if (data.get_target() != "x-ardour/plugin.preset") {
 		return;
 	}
 	if (data.get_length() != sizeof (PluginPresetPtr)) {
@@ -3612,6 +3609,23 @@ Mixer_UI::register_actions ()
 
 	ActionManager::register_toggle_action (group, X_("toggle-disk-monitor"), _("Toggle Disk Monitoring"), sigc::bind (sigc::mem_fun (*this, &Mixer_UI::toggle_monitor_action), MonitorDisk, false, false));
 	ActionManager::register_toggle_action (group, X_("toggle-input-monitor"), _("Toggle Input Monitoring"), sigc::bind (sigc::mem_fun (*this, &Mixer_UI::toggle_monitor_action), MonitorInput, false, false));
+
+	for (size_t i = 0; i < 12; ++i) {
+		std::string a = string_compose (X_("store-mixer-scene-%1"), i);
+		std::string n = string_compose (_("Store Mixer Scene Slot #%1"), i + 1);
+		ActionManager::register_action (group, a.c_str (), n.c_str (),
+		                                sigc::bind (sigc::mem_fun (*this, &Mixer_UI::store_mixer_scene), i));
+
+		a = string_compose (X_("recall-mixer-scene-%1"), i);
+		n = string_compose (_("Recall Mixer Scene Slot #%1"), i + 1);
+		ActionManager::register_action (group, a.c_str (), n.c_str (),
+		                                sigc::bind (sigc::mem_fun (*this, &Mixer_UI::recall_mixer_scene), i));
+
+		a = string_compose (X_("clear-mixer-scene-%1"), i);
+		n = string_compose (_("Clear Mixer Scene Slot #%1"), i + 1);
+		ActionManager::register_action (group, a.c_str (), n.c_str (),
+		                                sigc::bind (sigc::mem_fun (*this, &Mixer_UI::clear_mixer_scene), i));
+	}
 }
 
 void
@@ -3635,7 +3649,7 @@ Mixer_UI::control_action (boost::shared_ptr<T> (Stripable::*get_control)() const
 		if (s) {
 			ac = (s.get()->*get_control)();
 			if (ac) {
-				ac->start_touch (_session->audible_sample ());
+				ac->start_touch (timepos_t (_session->audible_sample ()));
 				cl->push_back (ac);
 				if (!have_val) {
 					val = !ac->get_value();
@@ -3820,6 +3834,33 @@ Mixer_UI::vca_unassign (boost::shared_ptr<VCA> vca)
 	}
 }
 
+void
+Mixer_UI::store_mixer_scene (size_t n)
+{
+	if (_session) {
+		_session->store_nth_mixer_scene (n);
+	}
+}
+
+void
+Mixer_UI::recall_mixer_scene (size_t n)
+{
+	if (_session) {
+		_session->apply_nth_mixer_scene (n);
+	}
+}
+
+void
+Mixer_UI::clear_mixer_scene (size_t n)
+{
+	if (_session) {
+		boost::shared_ptr<MixerScene> ms = _session->nth_mixer_scene (n, false);
+		if (ms) {
+			ms->clear ();
+		}
+	}
+}
+
 bool
 Mixer_UI::screenshot (std::string const& filename)
 {
@@ -3828,7 +3869,7 @@ Mixer_UI::screenshot (std::string const& filename)
 	}
 
 	int height = strip_packer.get_height();
-	bool with_vca = vca_vpacker.is_visible ();
+	bool with_vca = vca_vpacker.get_visible ();
 	MixerStrip* master = strip_by_route (_session->master_out ());
 
 	Gtk::OffscreenWindow osw;
@@ -3872,7 +3913,7 @@ Mixer_UI::screenshot (std::string const& filename)
 	Glib::RefPtr<Gdk::Pixbuf> pb = osw.get_pixbuf ();
 	pb->save (filename, "png");
 
-	/* unpack elements before destorying the Box & OffscreenWindow */
+	/* unpack elements before destroying the Box & OffscreenWindow */
 	list<Gtk::Widget*> children = b.get_children();
 	for (list<Gtk::Widget*>::iterator child = children.begin(); child != children.end(); ++child) {
 		b.remove (**child);

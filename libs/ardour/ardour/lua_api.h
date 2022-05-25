@@ -36,7 +36,7 @@
 #include "ardour/session.h"
 
 namespace ARDOUR {
-	class Readable;
+	class AudioReadable;
 }
 
 namespace ARDOUR { namespace LuaAPI {
@@ -70,10 +70,14 @@ namespace ARDOUR { namespace LuaAPI {
 
 	/** create a new Lua Processor (Plugin)
 	 *
-	 * @param s Session Handle
-	 * @param p Identifier or Name of the Processor
+	 * @param s  Session Handle
+	 * @param p  Identifier or Name of the Processor
+	 * @param td Time domain (audio or beats) for any automation data
 	 * @returns Processor object (may be nil)
 	 */
+	boost::shared_ptr<ARDOUR::Processor> new_luaproc_with_time_domain (ARDOUR::Session *s, const std::string& p, Temporal::TimeDomain td);
+
+	/* As above but uses default time domain for the session/application */
 	boost::shared_ptr<ARDOUR::Processor> new_luaproc (ARDOUR::Session *s, const std::string& p);
 
 	/** List all installed plugins */
@@ -98,8 +102,12 @@ namespace ARDOUR { namespace LuaAPI {
 	 * @param id Plugin Name, ID or URI
 	 * @param type Plugin Type
 	 * @param preset name of plugin-preset to load, leave empty "" to not load any preset after instantiation
+	 * @param td     Time domain for any automation data
 	 * @returns Processor or nil
 	 */
+	boost::shared_ptr<ARDOUR::Processor> new_plugin_with_time_domain (ARDOUR::Session *s, const std::string& id, ARDOUR::PluginType type, Temporal::TimeDomain td, const std::string& preset = "");
+
+	/* As above but uses default time domain for the session/application */
 	boost::shared_ptr<ARDOUR::Processor> new_plugin (ARDOUR::Session *s, const std::string& id, ARDOUR::PluginType type, const std::string& preset = "");
 
 	/** set a plugin control-input parameter value
@@ -150,7 +158,7 @@ namespace ARDOUR { namespace LuaAPI {
 	float get_plugin_insert_param (boost::shared_ptr<ARDOUR::PluginInsert> pi, uint32_t which, bool &ok);
 
 	/**
-	 * A convenience function to get a Automation Lists and ParamaterDescriptor
+	 * A convenience function to get a Automation Lists and ParameterDescriptor
 	 * for a given plugin control.
 	 *
 	 * This is equivalent to the following lua code
@@ -171,12 +179,12 @@ namespace ARDOUR { namespace LuaAPI {
 	 * @code
 	 * local al, cl, pd = ARDOUR.LuaAPI.plugin_automation (route:nth_plugin (0), 3)
 	 * @endcode
-	 * @returns 3 parameters: AutomationList, ControlList, ParamaterDescriptor
+	 * @returns 3 parameters: AutomationList, ControlList, ParameterDescriptor
 	 */
 	int plugin_automation (lua_State *lua);
 
 	/*
-	 * A convenience function to get a scale-points from a ParamaterDescriptor
+	 * A convenience function to get a scale-points from a ParameterDescriptor
 	 * @param p a ParameterDescriptor
 	 * @returns Lua Table with "name" -> value pairs
 	 */
@@ -269,7 +277,7 @@ namespace ARDOUR { namespace LuaAPI {
 	 *
 	 * This interface allows to load a plugins and directly access it using the Vamp Plugin API.
 	 *
-	 * A convenience method is provided to analyze Ardour::Readable objects (Regions).
+	 * A convenience method is provided to analyze Ardour::AudioReadable objects (Regions).
 	 */
 		public:
 			Vamp (const std::string&, float sample_rate);
@@ -282,7 +290,7 @@ namespace ARDOUR { namespace LuaAPI {
 
 			::Vamp::Plugin* plugin () { return _plugin; }
 
-			/** high-level abstraction to process a single channel of the given Readable.
+			/** high-level abstraction to process a single channel of the given AudioReadable.
 			 *
 			 * If the plugin is not yet initialized, initialize() is called.
 			 *
@@ -294,9 +302,9 @@ namespace ARDOUR { namespace LuaAPI {
 			 * @param fn lua callback function or nil
 			 * @return 0 on success
 			 */
-			int analyze (boost::shared_ptr<ARDOUR::Readable> r, uint32_t channel, luabridge::LuaRef fn);
+			int analyze (boost::shared_ptr<ARDOUR::AudioReadable> r, uint32_t channel, luabridge::LuaRef fn);
 
-			/** call plugin():reset() and clear intialization flag */
+			/** call plugin():reset() and clear initialization flag */
 			void reset ();
 
 			/** initialize the plugin for use with analyze().
@@ -341,7 +349,7 @@ namespace ARDOUR { namespace LuaAPI {
 
 	};
 
-	class Rubberband : public Readable , public boost::enable_shared_from_this<Rubberband>
+	class Rubberband : public AudioReadable , public boost::enable_shared_from_this<Rubberband>
 	{
 		public:
 			Rubberband (boost::shared_ptr<AudioRegion>, bool percussive);
@@ -349,10 +357,10 @@ namespace ARDOUR { namespace LuaAPI {
 			bool set_strech_and_pitch (double stretch_ratio, double pitch_ratio);
 			bool set_mapping (luabridge::LuaRef tbl);
 			boost::shared_ptr<AudioRegion> process (luabridge::LuaRef cb);
-			boost::shared_ptr<Readable> readable ();
+			boost::shared_ptr<AudioReadable> readable ();
 
-			/* readable API */
-			samplecnt_t readable_length () const { return _read_len; }
+			/* audioreadable API */
+			samplecnt_t readable_length_samples () const { return _read_len; }
 			uint32_t n_channels () const { return _n_channels; }
 			samplecnt_t read (Sample*, samplepos_t pos, samplecnt_t cnt, int channel) const;
 

@@ -48,7 +48,7 @@ namespace ARDOUR {
 }
 
 MonitorProcessor::MonitorProcessor (Session& s)
-	: Processor (s, X_("MonitorOut"))
+	: Processor (s, X_("MonitorOut"), Temporal::AudioTime)
 	, solo_cnt (0)
 	, _monitor_active (false)
 
@@ -228,7 +228,7 @@ MonitorProcessor::set_state (const XMLNode& node, int version)
 }
 
 XMLNode&
-MonitorProcessor::state ()
+MonitorProcessor::state () const
 {
 	XMLNode& node(Processor::state ());
 

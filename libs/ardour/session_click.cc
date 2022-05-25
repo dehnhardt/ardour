@@ -38,6 +38,7 @@
 using namespace std;
 using namespace ARDOUR;
 using namespace PBD;
+using namespace Temporal;
 
 Pool Click::pool ("click", sizeof (Click), 1024);
 
@@ -48,7 +49,7 @@ Pool Click::pool ("click", sizeof (Click), 1024);
  * (session.h does not include tempo.h so making this
  *  a Session member variable is tricky.)
  */
-static vector<TempoMap::BBTPoint> _click_points;
+static TempoMapPoints _click_points;
 
 void
 Session::add_click (samplepos_t pos, bool emphasis)
@@ -104,8 +105,8 @@ Session::click (samplepos_t cycle_start, samplecnt_t nframes)
 
 		Location* loop_location = get_play_loop () ? locations()->auto_loop_location () : NULL;
 		if (loop_location) {
-			const samplepos_t loop_start = loop_location->start ();
-			const samplepos_t loop_end = loop_location->end ();
+			const samplepos_t loop_start = loop_location->start_sample();
+			const samplepos_t loop_end = loop_location->end_sample();
 			if (start >= loop_end) {
 				samplecnt_t off = (start - loop_end) % (loop_end - loop_start);
 				start = loop_start + off;
@@ -123,25 +124,26 @@ Session::click (samplepos_t cycle_start, samplecnt_t nframes)
 		const samplepos_t end = start + move;
 
 		_click_points.clear ();
-		_tempo_map->get_grid (_click_points, start, end);
+		TempoMap::use()->get_grid (_click_points, samples_to_superclock (start, sample_rate()), samples_to_superclock (end, sample_rate()));
 
-		if (distance (_click_points.begin(), _click_points.end()) == 0) {
+		if (_click_points.empty()) {
 			start += move;
 			remain -= move;
 			continue;
 		}
 
-		for (vector<TempoMap::BBTPoint>::iterator i = _click_points.begin(); i != _click_points.end(); ++i) {
-			assert ((*i).sample >= start && (*i).sample < end);
-			switch ((*i).beat) {
-				case 1:
-					add_click ((*i).sample, true);
-					break;
-				default:
-					if (click_emphasis_data == 0 || (Config->get_use_click_emphasis () == false) || (click_emphasis_data && (*i).beat != 1)) { // XXX why is this check needed ??  (*i).beat !=1 must be true here
-						add_click ((*i).sample, false);
-					}
-					break;
+		for (TempoMapPoints::iterator i = _click_points.begin(); i != _click_points.end(); ++i) {
+
+			if (superclock_to_samples ((*i).sclock(), sample_rate()) < start) {
+				continue;
+			}
+
+			assert (superclock_to_samples ((*i).sclock(), sample_rate()) < end);
+
+			if (i->bbt().is_bar() && (click_emphasis_data && Config->get_use_click_emphasis())) {
+				add_click ((*i).sample (sample_rate()), true);
+			} else {
+				add_click ((*i).sample (sample_rate()), false);
 			}
 		}
 
@@ -180,8 +182,8 @@ Session::run_click (samplepos_t start, samplepos_t nframes)
 	bool crossloop = false;
 	samplecnt_t span = nframes;
 	if (loop_location) {
-		const samplepos_t loop_start = loop_location->start ();
-		const samplepos_t loop_end = loop_location->end ();
+		const samplepos_t loop_start = loop_location->start_sample ();
+		const samplepos_t loop_end = loop_location->end_sample ();
 		if (start >= loop_end) {
 			samplecnt_t off = (start - loop_end) % (loop_end - loop_start);
 			start = loop_start + off;
@@ -197,8 +199,8 @@ Session::run_click (samplepos_t start, samplepos_t nframes)
 		Click *clk = *i;
 
 		if (loop_location) {
-			const samplepos_t loop_start = loop_location->start ();
-			const samplepos_t loop_end = loop_location->end ();
+			const samplepos_t loop_start = loop_location->start_sample ();
+			const samplepos_t loop_end = loop_location->end_sample ();
 			/* remove any clicks that are outside loop location, and not currently playing */
 			if ((clk->start < loop_start || clk->start >= loop_end) && clk->offset == 0) {
 				delete clk;
@@ -217,7 +219,7 @@ Session::run_click (samplepos_t start, samplepos_t nframes)
 		} else if (crossloop) {
 			/* When loop wraps around in current cycle, take
 			 * clicks at loop-start into account */
-			const samplepos_t loop_start = loop_location->start ();
+			const samplepos_t loop_start = loop_location->start_sample ();
 			internal_offset = clk->start - loop_start + span;
 		} else if (_count_in_samples > 0) {
 			++i;
@@ -313,7 +315,6 @@ Session::setup_click_sounds (Sample** data, Sample const * default_data, samplec
 void
 Session::setup_click_sounds (int which)
 {
-	_click_points.reserve (8);
 	clear_clicks ();
 
 	if (which == 0 || which == 1) {

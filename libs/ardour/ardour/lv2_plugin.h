@@ -144,6 +144,9 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	bool has_editor () const;
 	bool has_message_output () const;
 
+	void add_slave (boost::shared_ptr<Plugin>, bool);
+	void remove_slave (boost::shared_ptr<Plugin>);
+
 	bool write_from_ui(uint32_t       index,
 	                   uint32_t       protocol,
 	                   uint32_t       size,
@@ -181,9 +184,6 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	}
 	static void set_global_ui_contrasting_color (uint32_t c) {
 		_ui_contrasting_color = c;
-	}
-	static void set_global_ui_scale_factor (float s) {
-		_ui_scale_factor = s;
 	}
 	static void set_global_ui_style_boxy (bool yn) {
 		_ui_style_boxy = yn ? 1 : 0;
@@ -302,6 +302,9 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 
 	Glib::Threads::Mutex _work_mutex;
 
+	Glib::Threads::Mutex                   _slave_lock;
+	std::set<boost::shared_ptr<LV2Plugin>> _slaves;
+
 #ifdef LV2_EXTENDED
 	static void queue_draw (LV2_Inline_Display_Handle);
 	static void midnam_update (LV2_Midnam_Handle);
@@ -346,7 +349,6 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	static uint32_t      _ui_background_color;
 	static uint32_t      _ui_foreground_color;
 	static uint32_t      _ui_contrasting_color;
-	static float         _ui_scale_factor;
 	static unsigned long _ui_transient_win_id;
 
 	mutable unsigned _state_version;

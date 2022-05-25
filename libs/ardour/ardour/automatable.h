@@ -50,7 +50,7 @@ class AutomationControl;
 class LIBARDOUR_API Automatable : virtual public Evoral::ControlSet, public Slavable
 {
 public:
-	Automatable(Session&);
+	Automatable(Session&, Temporal::TimeDomain);
 	Automatable (const Automatable& other);
 
 	virtual ~Automatable();
@@ -85,7 +85,7 @@ public:
 	boost::shared_ptr<const AutomationControl> automation_control (const Evoral::Parameter& id) const;
 
 	virtual void add_control(boost::shared_ptr<Evoral::Control>);
-	virtual bool find_next_event (double start, double end, Evoral::ControlEvent& ev, bool only_active = true) const;
+	virtual bool find_next_event (Temporal::timepos_t const & start, Temporal::timepos_t const & end, Evoral::ControlEvent& ev, bool only_active = true) const;
 	void clear_controls ();
 
 	virtual void non_realtime_locate (samplepos_t now);
@@ -110,9 +110,11 @@ public:
 	static const std::string xml_node_name;
 
 	int set_automation_xml_state (const XMLNode&, Evoral::Parameter default_param);
-	XMLNode& get_automation_xml_state();
+	XMLNode& get_automation_xml_state() const;
 
 	PBD::Signal0<void> AutomationStateChanged;
+
+	Temporal::TimeDomain time_domain() const { return _time_domain; }
 
 protected:
 	Session& _a_session;
@@ -131,12 +133,12 @@ protected:
 
 	SlavableControlList slavables () const { return SlavableControlList(); }
 
-protected:
-	void find_next_ac_event (boost::shared_ptr<AutomationControl>, double start, double end, Evoral::ControlEvent& ev) const;
-	void find_prev_ac_event (boost::shared_ptr<AutomationControl>, double start, double end, Evoral::ControlEvent& ev) const;
+	void find_next_ac_event (boost::shared_ptr<AutomationControl>, Temporal::timepos_t const & start, Temporal::timepos_t const & end, Evoral::ControlEvent& ev) const;
+	void find_prev_ac_event (boost::shared_ptr<AutomationControl>, Temporal::timepos_t const & start, Temporal::timepos_t const & end, Evoral::ControlEvent& ev) const;
 
 private:
 	PBD::ScopedConnectionList _control_connections; ///< connections to our controls' signals
+	Temporal::TimeDomain _time_domain;
 };
 
 

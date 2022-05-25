@@ -109,9 +109,11 @@
 #include "export_video_dialog.h"
 #include "global_port_matrix.h"
 #include "idleometer.h"
+#include "io_plugin_window.h"
 #include "keyeditor.h"
 #include "location_ui.h"
 #include "lua_script_manager.h"
+#include "luawindow.h"
 #include "plugin_dspload_window.h"
 #include "plugin_manager_ui.h"
 #include "rc_option_editor.h"
@@ -133,12 +135,14 @@ class ExportVideoDialog;
 class KeyEditor;
 class LocationUIWindow;
 class LuaScriptManager;
+class LuaWindow;
 class RCOptionEditor;
 class RouteParams_UI;
 class SessionOptionEditor;
 class SpeakerDialog;
 class GlobalPortMatrixWindow;
 class IdleOMeter;
+class IOPluginWindow;
 class PluginDSPLoadWindow;
 class PluginManagerUI;
 class DspStatisticsWindow;
@@ -155,6 +159,7 @@ class MainClock;
 class Mixer_UI;
 class PublicEditor;
 class RecorderUI;
+class TriggerPage;
 class SaveAsDialog;
 class SaveTemplateDialog;
 class SessionDialog;
@@ -235,7 +240,7 @@ public:
 	int load_session_from_startup_fsm ();
 
 	/// @return true if session was successfully unloaded.
-	int unload_session (bool hide_stuff = false);
+	int unload_session (bool hide_stuff = false, bool force_unload = false);
 	void close_session();
 
 	int  save_state_canfail (std::string state_name = "", bool switch_to_it = false);
@@ -269,7 +274,7 @@ public:
 	 *
 	 *  (either RapidScreenUpdate || SuperRapidScreenUpdate - user-config)
 	 */
-	static sigc::signal<void, samplepos_t> Clock;
+	static sigc::signal<void, Temporal::timepos_t> Clock;
 
 	static void close_all_dialogs () { CloseAllDialogs(); }
 	static sigc::signal<void> CloseAllDialogs;
@@ -278,6 +283,7 @@ public:
 	XMLNode* editor_settings() const;
 	XMLNode* preferences_settings() const;
 	XMLNode* mixer_settings () const;
+	XMLNode* trigger_page_settings () const;
 	XMLNode* recorder_settings () const;
 	XMLNode* keyboard_settings () const;
 	XMLNode* tearoff_settings (const char*) const;
@@ -321,11 +327,11 @@ public:
 	void export_video (bool range = false);
 
 	void session_add_audio_route (bool, int32_t, int32_t, ARDOUR::TrackMode, ARDOUR::RouteGroup *,
-	                              uint32_t, std::string const &, bool, ARDOUR::PresentationInfo::order_t order);
+	                              uint32_t, std::string const &, bool, ARDOUR::PresentationInfo::order_t order, bool trigger_visibility);
 
 	void session_add_midi_route (bool, ARDOUR::RouteGroup *, uint32_t, std::string const &, bool,
 	                             ARDOUR::PluginInfoPtr, ARDOUR::Plugin::PresetRecord*,
-	                             ARDOUR::PresentationInfo::order_t order);
+	                             ARDOUR::PresentationInfo::order_t order, bool trigger_visibility);
 
 	void session_add_foldback_bus (int32_t, uint32_t, std::string const &);
 
@@ -418,6 +424,7 @@ private:
 	PublicEditor*  editor;
 	Mixer_UI*      mixer;
 	RecorderUI*    recorder;
+	TriggerPage*   trigger_page;
 	Gtk::Tooltips _tooltips;
 	NSM_Client*    nsm;
 	bool          _was_dirty;
@@ -435,7 +442,6 @@ private:
 	void tabbable_state_change (ArdourWidgets::Tabbable&);
 
 	void toggle_meterbridge ();
-	void toggle_luawindow ();
 
 	int  setup_windows ();
 	void setup_transport ();
@@ -467,6 +473,10 @@ private:
 
 	void session_dirty_changed ();
 	void update_title ();
+
+	void cue_rec_state_changed ();
+	void cue_rec_state_clicked ();
+	void cue_ffwd_state_clicked ();
 
 	void map_transport_state ();
 	int32_t do_engine_start ();
@@ -515,6 +525,7 @@ private:
 	ArdourWidgets::ArdourVSpacer latency_spacer;
 	ArdourWidgets::ArdourVSpacer monitor_spacer;
 	ArdourWidgets::ArdourVSpacer scripts_spacer;
+	ArdourWidgets::ArdourVSpacer cuectrl_spacer;
 
 	ArdourWidgets::ArdourButton monitor_dim_button;
 	ArdourWidgets::ArdourButton monitor_mono_button;
@@ -531,6 +542,9 @@ private:
 
 
 	ArdourWidgets::ArdourButton latency_disable_button;
+
+	ArdourWidgets::ArdourButton  _cue_rec_enable;
+	ArdourWidgets::ArdourButton  _cue_play_enable;
 
 	Gtk::Label route_latency_value;
 	Gtk::Label io_latency_label;
@@ -708,12 +722,11 @@ private:
 	int         create_mixer ();
 	int         create_editor ();
 	int         create_meterbridge ();
-	int         create_luawindow ();
 	int         create_masters ();
 	int         create_recorder ();
+	int         create_trigger_page ();
 
 	Meterbridge  *meterbridge;
-	LuaWindow    *luawindow;
 
 	/* Dialogs that can be created via new<T> */
 
@@ -729,6 +742,7 @@ private:
 	WM::Proxy<ExportVideoDialog> export_video_dialog;
 	WM::Proxy<LuaScriptManager> lua_script_window;
 	WM::Proxy<IdleOMeter> idleometer;
+	WM::Proxy<IOPluginWindow> io_plugin_window;
 	WM::Proxy<PluginManagerUI> plugin_manager_ui;
 	WM::Proxy<PluginDSPLoadWindow> plugin_dsp_load_window;
 	WM::Proxy<DspStatisticsWindow> dsp_statistics_window;
@@ -745,6 +759,7 @@ private:
 	WM::ProxyWithConstructor<GlobalPortMatrixWindow> audio_port_matrix;
 	WM::ProxyWithConstructor<GlobalPortMatrixWindow> midi_port_matrix;
 	WM::ProxyWithConstructor<KeyEditor> key_editor;
+	WM::ProxyWithConstructor<LuaWindow> luawindow;
 
 	/* creator methods */
 
@@ -756,6 +771,7 @@ private:
 	VirtualKeyboardWindow*  create_virtual_keyboard_window();
 	GlobalPortMatrixWindow* create_global_port_matrix (ARDOUR::DataType);
 	KeyEditor*              create_key_editor ();
+	LuaWindow*              create_luawindow ();
 
 	ARDOUR::SystemExec *video_server_process;
 
@@ -902,6 +918,7 @@ private:
 	ArdourWidgets::ArdourButton mixer_visibility_button;
 	ArdourWidgets::ArdourButton prefs_visibility_button;
 	ArdourWidgets::ArdourButton recorder_visibility_button;
+	ArdourWidgets::ArdourButton trigger_page_visibility_button;
 
 	bool key_press_focus_accelerator_handler (Gtk::Window& window, GdkEventKey* ev, Gtkmm2ext::Bindings*);
 	bool try_gtk_accel_binding (GtkWindow* win, GdkEventKey* ev, bool translate, GdkModifierType modifier);
@@ -921,6 +938,7 @@ private:
 	void action_script_changed (int i, const std::string&);
 
 	void ask_about_scratch_deletion ();
+	bool nsm_first_session_opened;
 };
 
 #endif /* __ardour_gui_h__ */

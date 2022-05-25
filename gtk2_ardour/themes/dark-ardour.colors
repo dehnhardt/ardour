@@ -13,8 +13,8 @@
     <Color name="theme:bg1" value="373737ff"/>  <!--gtk_audio_track-->
     <Color name="theme:bg2" value="101010ff"/>  <!--ruler base-->
     <Color name="theme:contrasting" value="0xf10000ff"/>  <!--play head-->
-    <Color name="theme:contrasting clock" value="4BCD2FFF"/>  <!--clock: text-->
-    <Color name="theme:contrasting less" value="5697B3FF"/>  <!--gtk_bg_tooltip-->
+    <Color name="theme:contrasting clock" value="78cd2fff"/>  <!--clock: text-->
+    <Color name="theme:contrasting less" value="46B357FF"/>
     <Color name="theme:contrasting selection" value="5da3c1ff"/>  <!--gtk_bg_selected-->
     <Color name="theme:contrasting alt" value="CCA336ff"/>  <!--delta clock , clock edit-->
     <Color name="neutral:backgroundest" value="000000ff"/>  <!--border color-->
@@ -119,7 +119,7 @@
     <ColorAlias name="gtk_background" alias="theme:bg"/>
     <ColorAlias name="gtk_bases" alias="theme:bg2"/>
     <ColorAlias name="gtk_bg_selected" alias="theme:contrasting selection"/>
-    <ColorAlias name="gtk_bg_tooltip" alias="theme:contrasting less"/>
+    <ColorAlias name="gtk_bg_tooltip" alias="neutral:backgroundest"/>
     <ColorAlias name="gtk_bright_color" alias="widget:blue"/>
     <ColorAlias name="gtk_bright_indicator" alias="alert:red"/>
     <ColorAlias name="gtk_clip_indicator" alias="alert:red"/>
@@ -130,7 +130,7 @@
     <ColorAlias name="gtk_darkest" alias="theme:bg2"/>
     <ColorAlias name="gtk_entry_cursor" alias="alert:red"/>
     <ColorAlias name="gtk_fg_selected" alias="theme:bg2"/>
-    <ColorAlias name="gtk_fg_tooltip" alias="neutral:background"/>
+    <ColorAlias name="gtk_fg_tooltip" alias="neutral:foreground"/>
     <ColorAlias name="gtk_foldback_bg" alias="theme:bg1"/>
     <ColorAlias name="gtk_foreground" alias="neutral:foreground"/>
     <ColorAlias name="gtk_light_text_on_dark" alias="neutral:foreground2"/>
@@ -167,11 +167,11 @@
     <ColorAlias name="latency button: led active" alias="alert:ruddy"/>
     <ColorAlias name="layered button: fill" alias="widget:bg"/>
     <ColorAlias name="layered button: fill active" alias="alert:ruddy"/>
-    <ColorAlias name="location cd marker" alias="alert:cyan"/>
-    <ColorAlias name="location loop" alias="alert:green"/>
-    <ColorAlias name="location marker" alias="theme:contrasting clock"/>
-    <ColorAlias name="location punch" alias="alert:ruddy"/>
-    <ColorAlias name="location range" alias="alert:green"/>
+    <ColorAlias name="location cd marker" alias="theme:contrasting less"/>
+    <ColorAlias name="location loop" alias="alert:blue"/>
+    <ColorAlias name="location marker" alias="theme:contrasting less"/>
+    <ColorAlias name="location punch" alias="widget:ruddy"/>
+    <ColorAlias name="location range" alias="theme:contrasting less"/>
     <ColorAlias name="lock button: fill active" alias="widget:bg"/>
     <ColorAlias name="lock button: led active" alias="alert:red"/>
     <ColorAlias name="lua action button: fill" alias="widget:bg"/>
@@ -444,7 +444,7 @@
     <ColorAlias name="transport delta clock: edited text" alias="theme:contrasting alt"/>
     <ColorAlias name="transport delta clock: text" alias="theme:contrasting alt"/>
     <ColorAlias name="transport drag rect" alias="neutral:midground"/>
-    <ColorAlias name="transport loop rect" alias="alert:green"/>
+    <ColorAlias name="transport loop rect" alias="widget:blue"/>
     <ColorAlias name="transport marker bar" alias="widget:bg"/>
     <ColorAlias name="transport option button: fill" alias="widget:bg"/>
     <ColorAlias name="transport option button: fill active" alias="widget:bg"/>

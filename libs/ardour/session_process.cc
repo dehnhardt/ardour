@@ -35,6 +35,8 @@
 
 #include <glibmm/threads.h>
 
+#include "temporal/tempo.h"
+
 #include "ardour/audioengine.h"
 #include "ardour/auditioner.h"
 #include "ardour/butler.h"
@@ -42,14 +44,17 @@
 #include "ardour/debug.h"
 #include "ardour/disk_reader.h"
 #include "ardour/graph.h"
+#include "ardour/io_plug.h"
 #include "ardour/port.h"
 #include "ardour/process_thread.h"
+#include "ardour/rt_tasklist.h"
 #include "ardour/scene_changer.h"
 #include "ardour/session.h"
 #include "ardour/transport_fsm.h"
 #include "ardour/transport_master.h"
 #include "ardour/transport_master_manager.h"
 #include "ardour/ticker.h"
+#include "ardour/triggerbox.h"
 #include "ardour/types.h"
 #include "ardour/vca.h"
 #include "ardour/vca_manager.h"
@@ -67,6 +72,12 @@ using namespace std;
 #define TFSM_LOCATE(target,ltd,loop,force) { _transport_fsm->enqueue (new TransportFSM::Event (TransportFSM::Locate,target,ltd,loop,force)); }
 
 
+void
+Session::setup_thread_local_variables ()
+{
+	Temporal::TempoMap::fetch ();
+}
+
 /** Called by the audio engine when there is work to be done with JACK.
  * @param nframes Number of samples to process.
  */
@@ -76,14 +87,16 @@ Session::process (pframes_t nframes)
 {
 	TimerRAII tr (dsp_stats[OverallProcess]);
 
-	samplepos_t transport_at_start = _transport_sample;
-
-	_silent = false;
-
 	if (processing_blocked()) {
 		_silent = true;
 		return;
+	} else {
+		_silent = false;
 	}
+
+	samplepos_t transport_at_start = _transport_sample;
+
+	setup_thread_local_variables ();
 
 	if (non_realtime_work_pending()) {
 		DEBUG_TRACE (DEBUG::Butler, string_compose ("non-realtime work pending: %1 (%2%3%4)\n", enum_2_string (post_transport_work()), std::hex, post_transport_work(), std::dec));
@@ -97,13 +110,26 @@ Session::process (pframes_t nframes)
 
 	_engine.main_thread()->get_buffers ();
 
+	boost::shared_ptr<GraphChain> io_graph_chain = _io_graph_chain[0];
+	if (io_graph_chain) {
+		PortManager::falloff_cache_calc (nframes, _nominal_sample_rate);
+		_process_graph->process_io_plugs (io_graph_chain, nframes, 0);
+		io_graph_chain.reset (); /* drop reference */
+	}
+
 	(this->*process_function) (nframes);
+
+	io_graph_chain = _io_graph_chain[1];
+	if (io_graph_chain) {
+		_process_graph->process_io_plugs (io_graph_chain, nframes, 0);
+		io_graph_chain.reset (); /* drop reference */
+	}
 
 	/* realtime-safe meter-position and processor-order changes
 	 *
 	 * ideally this would be done in
 	 * Route::process_output_buffers() but various functions
-	 * callig it hold a _processor_lock reader-lock
+	 * calling it hold a _processor_lock reader-lock
 	 */
 	bool one_or_more_routes_declicking = false;
 	{
@@ -116,6 +142,13 @@ Session::process (pframes_t nframes)
 			if ((*i)->declick_in_progress()) {
 				one_or_more_routes_declicking = true;
 			}
+		}
+	}
+
+	if (_update_send_delaylines) {
+		boost::shared_ptr<RouteList> r = routes.reader ();
+		for (RouteList::const_iterator i = r->begin(); i != r->end(); ++i) {
+			(*i)->update_send_delaylines ();
 		}
 	}
 
@@ -185,9 +218,10 @@ Session::no_roll (pframes_t nframes)
 
 	_global_locate_pending = locate_pending ();
 
-	if (_process_graph) {
+	boost::shared_ptr<GraphChain> graph_chain = _graph_chain;
+	if (graph_chain) {
 		DEBUG_TRACE(DEBUG::ProcessThreads,"calling graph/no-roll\n");
-		_process_graph->routes_no_roll( nframes, _transport_sample, end_sample, non_realtime_work_pending());
+		_process_graph->routes_no_roll(graph_chain, nframes, _transport_sample, end_sample, non_realtime_work_pending());
 	} else {
 		PT_TIMING_CHECK (10);
 		for (RouteList::iterator i = r->begin(); i != r->end(); ++i) {
@@ -232,9 +266,10 @@ Session::process_routes (pframes_t nframes, bool& need_butler)
 
 	_global_locate_pending = locate_pending();
 
-	if (_process_graph) {
+	boost::shared_ptr<GraphChain> graph_chain = _graph_chain;
+	if (graph_chain) {
 		DEBUG_TRACE(DEBUG::ProcessThreads,"calling graph/process-routes\n");
-		if (_process_graph->process_routes (nframes, start_sample, end_sample, need_butler) < 0) {
+		if (_process_graph->process_routes (graph_chain, nframes, start_sample, end_sample, need_butler) < 0) {
 			stop_transport ();
 			return -1;
 		}
@@ -251,6 +286,7 @@ Session::process_routes (pframes_t nframes, bool& need_butler)
 			bool b = false;
 
 			if ((ret = (*i)->roll (nframes, start_sample, end_sample, b)) < 0) {
+				cerr << "ERR1 STOP\n";
 				TFSM_STOP (false, false);
 				return -1;
 			}
@@ -376,6 +412,8 @@ Session::process_with_events (pframes_t nframes)
 	assert (_count_in_samples == 0 || _remaining_latency_preroll == 0 || _count_in_samples == _remaining_latency_preroll);
 
 	// DEBUG_TRACE (DEBUG::Transport, string_compose ("Running count in/latency preroll of %1 & %2\n", _count_in_samples, _remaining_latency_preroll));
+
+	maybe_find_pending_cue ();
 
 	while (_count_in_samples > 0 || _remaining_latency_preroll > 0) {
 		samplecnt_t ns;
@@ -617,6 +655,8 @@ Session::process_with_events (pframes_t nframes)
 
 	} /* implicit release of route lock */
 
+	clear_active_cue ();
+
 	if (session_needs_butler) {
 		DEBUG_TRACE (DEBUG::Butler, "p-with-events: session needs butler, call it\n");
 		_butler->summon ();
@@ -680,10 +720,14 @@ Session::process_without_events (pframes_t nframes)
 
 	click (_transport_sample, nframes);
 
+	maybe_find_pending_cue ();
+
 	if (process_routes (nframes, session_needs_butler)) {
 		fail_roll (nframes);
 		return;
 	}
+
+	clear_active_cue ();
 
 	get_track_statistics ();
 
@@ -720,19 +764,6 @@ Session::process_audition (pframes_t nframes)
 		}
 	}
 
-	/* run the auditioner, and if it says we need butler service, ask for it */
-
-	if (auditioner->play_audition (nframes) > 0) {
-		DEBUG_TRACE (DEBUG::Butler, "auditioner needs butler, call it\n");
-		_butler->summon ();
-	}
-
-	/* if using a monitor section, run it because otherwise we don't hear anything */
-
-	if (_monitor_out && auditioner->needs_monitor()) {
-		_monitor_out->monitor_run (_transport_sample, _transport_sample + nframes, nframes);
-	}
-
 	/* handle pending events */
 
 	while (pending_events.read (&ev, 1) == 1) {
@@ -748,6 +779,19 @@ Session::process_audition (pframes_t nframes)
 		SessionEvent *ev = immediate_events.front ();
 		immediate_events.pop_front ();
 		process_event (ev);
+	}
+
+	/* run the auditioner, and if it says we need butler service, ask for it */
+
+	if (auditioner->play_audition (nframes) > 0) {
+		DEBUG_TRACE (DEBUG::Butler, "auditioner needs butler, call it\n");
+		_butler->summon ();
+	}
+
+	/* if using a monitor section, run it because otherwise we don't hear anything */
+
+	if (_monitor_out && auditioner->needs_monitor()) {
+		_monitor_out->monitor_run (_transport_sample, _transport_sample + nframes, nframes);
 	}
 
 	if (!auditioner->auditioning()) {
@@ -836,6 +880,11 @@ Session::set_next_event ()
 		if ((*next_event)->action_sample >= _transport_sample) {
 			break;
 		}
+	}
+	if (next_event != events.end()) {
+		DEBUG_TRACE (DEBUG::SessionEvents, string_compose ("@ %1 next event set to %2 @ %3\n", _transport_sample, enum_2_string ((*next_event)->type), (*next_event)->action_sample));
+	} else {
+		DEBUG_TRACE (DEBUG::SessionEvents, string_compose ("no next event for %1\n", _transport_sample));
 	}
 }
 
@@ -961,6 +1010,7 @@ Session::process_event (SessionEvent* ev)
 		break;
 
 	case SessionEvent::RangeStop:
+		cerr << "RANGE STOP\n";
 		TFSM_STOP (ev->yes_or_no, false);
 		remove = false;
 		del = false;
@@ -1018,6 +1068,10 @@ Session::process_event (SessionEvent* ev)
 		g_atomic_int_set (&_suspend_timecode_transmission, ev->yes_or_no ? 0 : 1);
 		break;
 
+	case SessionEvent::SyncCues:
+		sync_cues ();
+		break;
+
 	default:
 	  fatal << string_compose(_("Programming error: illegal event type in process_event (%1)"), ev->type) << endmsg;
 		abort(); /*NOTREACHED*/
@@ -1030,6 +1084,30 @@ Session::process_event (SessionEvent* ev)
 
 	if (del) {
 		delete ev;
+	}
+}
+
+void
+Session::handle_slots_empty_status (boost::weak_ptr<Route> const & wr)
+{
+	boost::shared_ptr<Route> r = wr.lock();
+
+	if (!r) {
+		return;
+	}
+
+	if (r->triggerbox()) {
+		if (r->triggerbox()->empty()) {
+			/* signal was emitted, and no slots are used now, so
+			   there was change from >0 slots to 0 slots
+			*/
+			tb_with_filled_slots--;
+		} else {
+			/* signal was emitted, some slots are used now, so
+			   there was a change from 0 slots to > 0
+			*/
+			tb_with_filled_slots++;
+		}
 	}
 }
 
@@ -1055,6 +1133,14 @@ Session::compute_stop_limit () const
 		return max_samplepos;
 	} else if (punching_in && punching_out && _locations->auto_punch_location()->end() > current_end_sample()) {
 		/* punching in and punching out after session end */
+		return max_samplepos;
+	}
+
+	/* if there are any triggerboxen with slots filled, we ignore the end
+	 * marker
+	 */
+
+	if (tb_with_filled_slots) {
 		return max_samplepos;
 	}
 
@@ -1266,7 +1352,7 @@ Session::plan_master_strategy (pframes_t nframes, double master_speed, samplepos
 		return desired;
 	}
 
-	/* When calling TransportMasterStart, sould aim for
+	/* When calling TransportMasterStart, should aim for
 	 *   delta >= _remaining_latency_preroll
 	 * This way there can be silent pre-roll of exactly the delta time.
 	 *
@@ -1544,9 +1630,110 @@ Session::implement_master_strategy ()
 		TFSM_EVENT (TransportFSM::StartTransport);
 		break;
 	case TransportMasterStop:
+		cerr << "MASTER STOP\n";
 		TFSM_STOP (false, false);
 		break;
 	}
 
 	return true;
+}
+
+void
+Session::sync_cues ()
+{
+	_locations->apply (*this, &Session::sync_cues_from_list);
+}
+
+struct LocationByTime
+{
+	bool operator() (Location const *a, Location const * b) {
+		return a->start() < b->start();
+	}
+};
+
+void
+Session::sync_cues_from_list (Locations::LocationList const & locs)
+{
+	Locations::LocationList sorted (locs);
+	LocationByTime cmp;
+
+	sorted.sort (cmp);
+
+	CueEvents::size_type n = 0;
+
+	/* this leaves the capacity unchanged */
+	_cue_events.clear ();
+
+	for (auto const & loc : sorted) {
+
+		if (loc->is_cue_marker()) {
+			_cue_events.push_back (CueEvent (loc->cue_id(), loc->start_sample()));
+		}
+
+		if (++n >= _cue_events.capacity()) {
+			break;
+		}
+	}
+}
+
+int32_t
+Session::first_cue_within (samplepos_t s, samplepos_t e, bool& was_recorded)
+{
+	int32_t active_cue = _active_cue.load ();
+
+	was_recorded = false;
+
+	if (active_cue >= 0) {
+		return active_cue;
+	}
+
+	if (!(config.get_cue_behavior() & FollowCues)) {
+		return -1;
+	}
+
+	CueEventTimeComparator cmp;
+	CueEvents::iterator si = lower_bound (_cue_events.begin(), _cue_events.end(), s, cmp);
+
+	if (si != _cue_events.end()) {
+		if (si->time < e) {
+			was_recorded = true;
+			return si->cue;
+		}
+	}
+
+	return -1;
+}
+
+void
+Session::cue_marker_change (Location* /* ignored */)
+{
+	SessionEvent* ev = new SessionEvent (SessionEvent::SyncCues, SessionEvent::Add, SessionEvent::Immediate, 0, 0.0);
+	queue_event (ev);
+}
+
+void
+Session::cue_bang (int32_t cue)
+{
+	_pending_cue.store (cue);
+}
+
+void
+Session::maybe_find_pending_cue ()
+{
+	int32_t ac = _pending_cue.exchange (-1);
+	if (ac >= 0) {
+		_active_cue.store (ac);
+
+		if (TriggerBox::cue_recording()) {
+			CueRecord cr (ac, _transport_sample);
+			TriggerBox::cue_records.write (&cr, 1);
+			/* failure is acceptable, but unlikely */
+		}
+	}
+}
+
+void
+Session::clear_active_cue ()
+{
+	_active_cue.store (-1);
 }

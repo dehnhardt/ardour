@@ -99,6 +99,18 @@ TransportFSM::init ()
 }
 
 void
+TransportFSM::hard_stop ()
+{
+	_motion_state = Stopped;
+	_last_locate.target = max_samplepos;
+	current_roll_after_locate_status = boost::none;
+	_direction_state = Forwards;
+	_transport_speed = 0;
+	_reverse_after_declick = 0;
+	_butler_state = NotWaitingForButler;
+}
+
+void
 TransportFSM::process_events ()
 {
 	processing++;
@@ -337,7 +349,7 @@ TransportFSM::process_event (Event& ev, bool already_deferred, bool& deferred)
 				 * This happens because we only need to do a
 				 * realtime locate and continue rolling. No
 				 * disk I/O is required - the loop is
-				 * automically present in buffers already.
+				 * automatically present in buffers already.
 				 *
 				 * Note that ev.ltd is ignored and
 				 * assumed to be true because we're looping.
@@ -830,7 +842,7 @@ TransportFSM::set_speed (Event const & ev)
 }
 
 bool
-TransportFSM::will_roll_fowards () const
+TransportFSM::will_roll_forwards () const
 {
 	if (reversing() || _reverse_after_declick) {
 		return most_recently_requested_speed >= 0; /* note: future speed of zero is equivalent to Forwards */

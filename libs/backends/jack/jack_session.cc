@@ -34,6 +34,7 @@
 #include "jack_session.h"
 
 using namespace ARDOUR;
+using namespace Temporal;
 using std::string;
 
 JACKSession::JACKSession (Session* s)
@@ -113,8 +114,8 @@ JACKSession::timebase_callback (jack_transport_state_t /*state*/,
 				 jack_position_t* pos,
 				 int /*new_position*/)
 {
-	Timecode::BBT_Time bbt;
-	TempoMap& tempo_map (_session->tempo_map());
+	Temporal::BBT_Time bbt;
+	TempoMap::SharedPtr tempo_map (TempoMap::use());
 	samplepos_t tf;
 
 	/* see commit msg for e2c26e1b9 and Session::start_locate() for
@@ -125,22 +126,22 @@ JACKSession::timebase_callback (jack_transport_state_t /*state*/,
 
 	/* BBT info */
 
-	TempoMetric metric (tempo_map.metric_at (tf));
+	TempoMetric metric (tempo_map->metric_at (tf));
 
 	try {
-		bbt = tempo_map.bbt_at_sample_rt (tf);
+		bbt = tempo_map->bbt_at (timepos_t (tf));
 
 		pos->bar = bbt.bars;
 		pos->beat = bbt.beats;
 		pos->tick = bbt.ticks;
 
 		pos->beats_per_bar = metric.meter().divisions_per_bar();
-		pos->beat_type = metric.meter().note_divisor();
-		pos->ticks_per_beat = Timecode::BBT_Time::ticks_per_beat;
+		pos->beat_type = metric.meter().note_value();
+		pos->ticks_per_beat = Temporal::ticks_per_beat;
 		pos->beats_per_minute = metric.tempo().note_types_per_minute();
 
-		double current_tick = tempo_map.quarter_note_at_bbt_rt (bbt) / 4 * pos->beat_type * pos->ticks_per_beat;
-		pos->bar_start_tick = current_tick - ((pos->beat - 1) * pos->ticks_per_beat + pos->tick);
+		Beats current_tick = metric.quarters_at (bbt) / 4 * pos->beat_type * pos->ticks_per_beat;
+		pos->bar_start_tick = current_tick.to_ticks() - ((pos->beat - 1) * pos->ticks_per_beat + pos->tick);
 
 		pos->valid = jack_position_bits_t (pos->valid | JackPositionBBT);
 

@@ -24,6 +24,8 @@
 #include <gtkmm/window.h>
 #include <gtkmm/label.h>
 
+#include "pbd/i18n.h"
+
 #include "canvas/text.h"
 #include "canvas/canvas.h"
 #include "gtkmm2ext/colors.h"
@@ -31,6 +33,7 @@
 using namespace std;
 using namespace ArdourCanvas;
 
+Text::FontSizeMaps Text::font_size_maps;
 
 Text::Text (Canvas* c)
 	: Item (c)
@@ -42,6 +45,7 @@ Text::Text (Canvas* c)
 	, _need_redraw (false)
         , _width_correction (-1)
 	, _clamped_width (COORD_MAX)
+	, _height_based_on_allocation (false)
 {
 	_outline = false;
 }
@@ -56,6 +60,7 @@ Text::Text (Item* parent)
 	, _need_redraw (false)
         , _width_correction (-1)
 	, _clamped_width (COORD_MAX)
+	, _height_based_on_allocation (false)
 {
 	_outline = false;
 }
@@ -63,6 +68,16 @@ Text::Text (Item* parent)
 Text::~Text ()
 {
 	delete _font_description;
+}
+
+void
+Text::set_height_based_on_allocation (bool yn)
+{
+	/* assumed to be set during construction, so we do not schedule a
+	 * redraw after changing this.
+	 */
+
+	_height_based_on_allocation = yn;
 }
 
 void
@@ -77,7 +92,7 @@ Text::set (string const & text)
 	_text = text;
 
 	_need_redraw = true;
-	_bounding_box_dirty = true;
+	set_bbox_dirty ();
 
 	end_change ();
 }
@@ -103,6 +118,9 @@ Text::height () const
 void
 Text::_redraw () const
 {
+	/* XXX we should try to remove this assertion someday. Nothing wrong
+	   with empty text.
+	*/
 	assert (!_text.empty());
 	assert (_canvas);
 	Glib::RefPtr<Pango::Context> context = _canvas->get_pango_context();
@@ -192,18 +210,17 @@ Text::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) const
 		return;
 	}
 
-	Rect self = item_to_window (Rect (0, 0, min (_clamped_width, (double)_image->get_width ()), _image->get_height ()));
-	Rect i = self.intersection (area);
+	const Rect r (0, 0, min (_clamped_width, (double)_image->get_width ()), _image->get_height ());
+	Rect self = item_to_window (r);
+	Rect intersection = self.intersection (area);
 
-	if (!i) {
+	if (!intersection) {
 		return;
 	}
 
 	if (_need_redraw) {
 		_redraw ();
 	}
-
-	Rect intersection (i);
 
 	context->rectangle (intersection.x0, intersection.y0, intersection.width(), intersection.height());
 #ifdef __APPLE__
@@ -228,7 +245,7 @@ Text::clamp_width (double w)
 	}
 	begin_change ();
 	_clamped_width = w;
-	_bounding_box_dirty = true;
+	set_bbox_dirty ();
 	end_change ();
 }
 
@@ -237,11 +254,11 @@ Text::compute_bounding_box () const
 {
 	if (!_canvas || _text.empty()) {
 		_bounding_box = Rect ();
-		_bounding_box_dirty = false;
+		set_bbox_clean ();
 		return;
 	}
 
-	if (_bounding_box_dirty) {
+	if (bbox_dirty()) {
 #ifdef __APPLE__
 		const float retina_factor = 0.5;
 #else
@@ -251,7 +268,7 @@ Text::compute_bounding_box () const
 			_redraw ();
 		}
 		_bounding_box = Rect (0, 0, min (_clamped_width, (double) _image->get_width() * retina_factor), _image->get_height() * retina_factor);
-		_bounding_box_dirty = false;
+		set_bbox_clean ();
 	}
 }
 
@@ -266,7 +283,7 @@ Text::set_alignment (Pango::Alignment alignment)
 
 	_alignment = alignment;
 	_need_redraw = true;
-	_bounding_box_dirty = true;
+	set_bbox_dirty ();
 	end_change ();
 }
 
@@ -279,7 +296,7 @@ Text::set_font_description (Pango::FontDescription font_description)
 	_need_redraw = true;
         _width_correction = -1.0;
 
-	_bounding_box_dirty = true;
+	set_bbox_dirty ();
 	end_change ();
 }
 
@@ -308,7 +325,7 @@ Text::dump (ostream& o) const
 	Item::dump (o);
 
 	o << _canvas->indent() << '\t' << " text = " << _text << endl
-	  << _canvas->indent() << " color = " << _color;
+	  << _canvas->indent() << " color = 0x" << hex << _color << dec;
 
 	o << endl;
 }
@@ -322,4 +339,95 @@ Text::text_width() const
     }
 
     return _width;
+}
+
+double
+Text::text_height() const
+{
+    if (_need_redraw) {
+        redraw ();
+    }
+
+    return _height;
+}
+
+void
+Text::_size_allocate (Rect const & r)
+{
+	Item::_size_allocate (r);
+
+	if (!layout_sensitive()) {
+		/* not doing this */
+		return;
+	}
+
+	if (!_height_based_on_allocation) {
+		/* non-resizable text */
+		return;
+	}
+
+	int font_size = font_size_for_height (r.height(), _font_description->get_family(), _canvas->get_pango_context());
+
+	if (font_size) {
+		char font_name[32];
+		std::string family = "Sans"; // UIConfiguration::instance().get_ui_font_family();
+		snprintf (font_name, sizeof (font_name), "%s %d", family.c_str(), font_size);
+		Pango::FontDescription pfd (font_name);
+		set_font_description (pfd);
+		show ();
+	} else {
+		hide ();
+	}
+}
+
+int
+Text::font_size_for_height (Distance height, std::string const & font_family, Glib::RefPtr<Pango::Context> const & ctxt)
+{
+	FontSizeMaps::iterator fsM = font_size_maps.find (font_family);  /* map of maps */
+
+	if (fsM == font_size_maps.end()) {
+		fsM = font_size_maps.insert (make_pair (font_family, FontSizeMap())).first;
+	}
+
+	FontSizeMap::iterator fsm = fsM->second.find (height); /* map of point size -> pixel height */
+
+	if (fsm != fsM->second.end()) {
+		return fsm->second;
+	}
+
+	Glib::RefPtr<Pango::Layout> l (Pango::Layout::create (ctxt));
+	int font_size = 0;
+	char font_name[32];
+
+	/* Translators: Xg is a nonsense string that should include the
+	   highest glyph and a glyph with the lowest descender
+	*/
+
+	l->set_text (_("Xg"));
+
+	for (uint32_t pt = 5; pt < 24; ++pt) {
+
+		snprintf (font_name, sizeof (font_name), "%s %d", font_family.c_str(), pt);
+		Pango::FontDescription pfd (font_name);
+		l->set_font_description (pfd);
+
+		int w, h;
+		l->get_pixel_size (w, h);
+		if (h > height) {
+			font_size = pt - 1;
+			break;
+		}
+	}
+
+	if (font_size) {
+		fsM->second.insert (make_pair (height, font_size));
+	}
+
+	return font_size;
+}
+
+void
+Text::drop_height_maps ()
+{
+	font_size_maps.clear ();
 }

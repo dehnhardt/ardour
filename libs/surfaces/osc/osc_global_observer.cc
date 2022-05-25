@@ -27,6 +27,8 @@
 #include "ardour/meter.h"
 #include "ardour/monitor_processor.h"
 
+#include "temporal/tempo.h"
+
 #include "osc.h"
 #include "osc_global_observer.h"
 
@@ -242,9 +244,9 @@ OSCGlobalObserver::tick ()
 			_osc.text_message (X_("/position/smpte"), os.str(), addr);
 		}
 		if (feedback[5]) { // Bar beat enabled
-			Timecode::BBT_Time bbt_time;
+			Temporal::BBT_Time bbt_time;
 
-			session->bbt_time (now_sample, bbt_time);
+			bbt_time = Temporal::TempoMap::use()->bbt_at (timepos_t (now_sample));
 
 			// semantics:  BBB/bb/tttt
 			ostringstream os;
@@ -431,12 +433,12 @@ OSCGlobalObserver::marks_changed ()
 	// get Locations that are marks
 	for (Locations::LocationList::const_iterator l = ll.begin(); l != ll.end(); ++l) {
 		if ((*l)->is_session_range ()) {
-			lm.push_back (LocationMarker(_("start"), (*l)->start ()));
-			lm.push_back (LocationMarker(_("end"), (*l)->end ()));
+			lm.push_back (LocationMarker(_("start"), (*l)->start_sample ()));
+			lm.push_back (LocationMarker(_("end"), (*l)->end_sample ()));
 			continue;
 		}
 		if ((*l)->is_mark ()) {
-			lm.push_back (LocationMarker((*l)->name(), (*l)->start ()));
+			lm.push_back (LocationMarker((*l)->name(), (*l)->start_sample ()));
 		}
 	}
 	// sort them by position

@@ -51,14 +51,14 @@ CairoWidget::CairoWidget ()
 	, _current_parent (0)
 	, _canvas_widget (false)
 	, _nsglview (0)
+#ifdef USE_CAIRO_IMAGE_SURFACE
+	, _use_image_surface (true)
+#else
+	, _use_image_surface (NULL != getenv("ARDOUR_IMAGE_SURFACE"))
+#endif
 	, _widget_name ("")
 {
 	_name_proxy.connect (sigc::mem_fun (*this, &CairoWidget::on_widget_name_changed));
-#ifdef USE_CAIRO_IMAGE_SURFACE
-	_use_image_surface = true;
-#else
-	_use_image_surface = NULL != getenv("ARDOUR_IMAGE_SURFACE");
-#endif
 }
 
 CairoWidget::~CairoWidget ()
@@ -88,7 +88,7 @@ CairoWidget::use_nsglview ()
 {
 	assert (!_nsglview);
 	assert (!_canvas_widget);
-	assert (!is_realized());
+	assert (!get_realized());
 #ifdef ARDOUR_CANVAS_NSVIEW_TAG // patched gdkquartz.h
 	_nsglview = Gtkmm2ext::nsglview_create (this);
 #endif
@@ -107,7 +107,7 @@ CairoWidget::use_image_surface (bool yn)
 int
 CairoWidget::get_width () const
 {
-	if (_canvas_widget) {
+	if (_canvas_widget && (_allocation.get_width() || _allocation.get_height())) {
 		return _allocation.get_width ();
 	}
 	return Gtk::EventBox::get_width ();
@@ -116,7 +116,7 @@ CairoWidget::get_width () const
 int
 CairoWidget::get_height () const
 {
-	if (_canvas_widget) {
+	if (_canvas_widget && (_allocation.get_width() || _allocation.get_height())) {
 		return _allocation.get_height ();
 	}
 	return Gtk::EventBox::get_height ();
@@ -183,7 +183,6 @@ CairoWidget::on_expose_event (GdkEventExpose *ev)
 		cr->set_source_rgb (bg.get_red_p(), bg.get_green_p(), bg.get_blue_p());
 		cr->fill ();
 	} else {
-		std::cerr << get_name() << " skipped bg fill\n";
 		cr->clip ();
 	}
 
@@ -360,6 +359,10 @@ CairoWidget::on_style_changed (const Glib::RefPtr<Gtk::Style>&)
 void
 CairoWidget::on_realize ()
 {
+	if (_canvas_widget) {
+		/* do not need a realized event box */
+		return;
+	}
 	Gtk::EventBox::on_realize();
 #ifdef __APPLE__
 	if (_nsglview) {

@@ -20,39 +20,38 @@
 #ifndef __ardour_analyser_h__
 #define __ardour_analyser_h__
 
-#include <glibmm/threads.h>
 #include <boost/shared_ptr.hpp>
 
 #include "ardour/libardour_visibility.h"
+#include "pbd/pthread_utils.h"
 
-namespace ARDOUR {
-
+namespace ARDOUR
+{
 class AudioFileSource;
 class Source;
-class TransientDetector;
 
-class LIBARDOUR_API Analyser {
-
-  public:
-	Analyser();
-	~Analyser ();
+class LIBARDOUR_API Analyser
+{
+public:
+	Analyser ();
 
 	static void init ();
+	static void terminate ();
 	static void queue_source_for_analysis (boost::shared_ptr<Source>, bool force);
 	static void work ();
 	static void flush ();
 
-  private:
-	static Analyser* the_analyser;
-	static Glib::Threads::Mutex analysis_active_lock;
-	static Glib::Threads::Mutex analysis_queue_lock;
-	static Glib::Threads::Cond  SourcesToAnalyse;
-	static std::list<boost::weak_ptr<Source> > analysis_queue;
+private:
+	static Glib::Threads::Mutex               analysis_active_lock;
+	static Glib::Threads::Mutex               analysis_queue_lock;
+	static Glib::Threads::Cond                SourcesToAnalyse;
+	static std::list<boost::weak_ptr<Source>> analysis_queue;
+	static bool                               analysis_thread_run;
+	static PBD::Thread*                       analysis_thread;
 
 	static void analyse_audio_file_source (boost::shared_ptr<AudioFileSource>);
 };
 
-
-}
+} // namespace ARDOUR
 
 #endif /* __ardour_analyser_h__ */

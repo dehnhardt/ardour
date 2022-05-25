@@ -30,13 +30,6 @@
     the value of the variable.
 *****************************************************/
 
-/*****************************************************
-    DO dump the config using cfgtool to system_config
-    after modifying this file.
-
-    ./waf && gtk2_ardour/arcfg system_config
-*****************************************************/
-
 /* IO connection */
 
 CONFIG_VARIABLE (bool, auto_connect_standard_busses, "auto-connect-standard-busses", true)
@@ -46,6 +39,9 @@ CONFIG_VARIABLE (bool, auto_connect_standard_busses, "auto-connect-standard-buss
 CONFIG_VARIABLE (AutoConnectOption, output_auto_connect, "output-auto-connect", AutoConnectMaster)
 CONFIG_VARIABLE (AutoConnectOption, input_auto_connect, "input-auto-connect", AutoConnectPhysical)
 CONFIG_VARIABLE (bool, strict_io, "strict-io", true)
+
+/* 0: off, no varispeed, q: 8..96 */
+CONFIG_VARIABLE (uint32_t, port_resampler_quality, "port-resampler-quality,", 17)
 
 /* Connect all physical inputs to a dummy port, this makes raw input data available.
  * `jack_port_get_buffer (jack_port_by_name (c, "system:capture_1") , n_samples);`
@@ -76,6 +72,7 @@ CONFIG_VARIABLE (int32_t, initial_program_change, "initial-program-change", -1)
 CONFIG_VARIABLE (bool, first_midi_bank_is_zero, "display-first-midi-bank-as-zero", false)
 CONFIG_VARIABLE (int32_t, inter_scene_gap_samples, "inter-scene-gap-samples", 1)
 CONFIG_VARIABLE (bool, midi_input_follows_selection, "midi-input-follows-selection", 1)
+CONFIG_VARIABLE (std::string, default_trigger_input_port, "default-trigger-input-port", "")
 
 /* Timecode and related */
 
@@ -119,6 +116,7 @@ CONFIG_VARIABLE (bool, region_boundaries_from_onscreen_tracks, "region-boundarie
 CONFIG_VARIABLE (FadeShape, default_fade_shape, "default-fade-shape", FadeConstantPower)
 CONFIG_VARIABLE (RangeSelectionAfterSplit, range_selection_after_split, "range-selection-after-split", PreserveSel)
 CONFIG_VARIABLE (RegionSelectionAfterSplit, region_selection_after_split, "region-selection-after-split", None)
+CONFIG_VARIABLE (bool, interview_editing, "interview-editing", false)
 
 /* monitoring, mute, solo etc */
 
@@ -190,7 +188,6 @@ CONFIG_VARIABLE (MeterType, meter_type_master, "meter-type-master", MeterK14)
 CONFIG_VARIABLE (MeterType, meter_type_track, "meter-type-track", MeterPeak)
 CONFIG_VARIABLE (MeterType, meter_type_bus, "meter-type-bus", MeterPeak)
 
-
 /* miscellany */
 
 CONFIG_VARIABLE (bool, try_autostart_engine, "try-autostart-engine", true)
@@ -215,6 +212,8 @@ CONFIG_VARIABLE_SPECIAL (std::string, default_session_parent_dir, "default-sessi
 #else
 CONFIG_VARIABLE_SPECIAL (std::string, default_session_parent_dir, "default-session-parent-dir", "~", poor_mans_glob)
 #endif
+CONFIG_VARIABLE (std::string, clip_library_dir, "clip-library-dir", "@default@") /* writable folder */
+CONFIG_VARIABLE (std::string, sample_lib_path, "sample-lib-path", "") /* custom paths */
 CONFIG_VARIABLE (bool, allow_special_bus_removal, "allow-special-bus-removal", false)
 CONFIG_VARIABLE (int32_t, processor_usage, "processor-usage", -1)
 CONFIG_VARIABLE (int32_t, cpu_dma_latency, "cpu-dma-latency", -1) /* >=0 to enable */
@@ -222,9 +221,10 @@ CONFIG_VARIABLE (gain_t, max_gain, "max-gain", 2.0) /* +6.0dB */
 CONFIG_VARIABLE (uint32_t, max_recent_sessions, "max-recent-sessions", 10)
 CONFIG_VARIABLE (uint32_t, max_recent_templates, "max-recent-templates", 10)
 CONFIG_VARIABLE (double, automation_thinning_factor, "automation-thinning-factor", 20.0)
-CONFIG_VARIABLE (std::string, freesound_download_dir, "freesound-download-dir", Glib::get_home_dir() + "/Freesound/snd")
 CONFIG_VARIABLE (samplecnt_t, range_location_minimum, "range-location-minimum", 128) /* samples */
 CONFIG_VARIABLE (EditMode, edit_mode, "edit-mode", Slide)
+CONFIG_VARIABLE (RippleMode, ripple_mode, "ripple-mode", RippleSelected)
+CONFIG_VARIABLE (Temporal::TimeDomain, default_automation_time_domain, "default-automation-time-domain", Temporal::BeatTime)
 
 /* plugin related */
 
@@ -276,7 +276,6 @@ CONFIG_VARIABLE (std::string, video_server_docroot, "video-server-docroot", "/")
 #else
 CONFIG_VARIABLE (std::string, video_server_docroot, "video-server-docroot", "C:\\")
 #endif
-CONFIG_VARIABLE (bool, show_video_export_info, "show-video-export-info", true)
 CONFIG_VARIABLE (bool, show_video_server_dialog, "show-video-server-dialog", false)
 
 /* export */

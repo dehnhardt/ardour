@@ -486,7 +486,7 @@ MonitorSection::MonitorSection ()
 
 	signal_enter_notify_event().connect (sigc::mem_fun (*this, &MonitorSection::enter_handler));
 	signal_leave_notify_event().connect (sigc::mem_fun (*this, &MonitorSection::leave_handler));
-	set_flags (CAN_FOCUS);
+	set_can_focus ();
 
 	_tearoff = new TearOff (*this);
 
@@ -560,7 +560,7 @@ MonitorSection::leave_handler (GdkEventCrossing* ev)
 
 	Widget* top = get_toplevel();
 
-	if (top->is_toplevel() && top != &_tearoff->tearoff_window()) {
+	if (top->get_is_toplevel() && top != &_tearoff->tearoff_window()) {
 		Window* win = dynamic_cast<Window*> (top);
 		gtk_window_set_focus (win->gobj(), 0);
 	}
@@ -579,7 +579,7 @@ MonitorSection::update_processor_box ()
 		toggle_processorbox_button.set_name (X_("monitor section processors toggle"));
 	}
 
-	if (insert_box->is_visible() == show_processor_box) {
+	if (insert_box->get_visible() == show_processor_box) {
 		return;
 	}
 
@@ -694,10 +694,10 @@ MonitorSection::ChannelButtonSet::ChannelButtonSet ()
 	solo.set_name (X_("solo button"));
 	invert.set_name (X_("invert button"));
 
-	cut.unset_flags (Gtk::CAN_FOCUS);
-	dim.unset_flags (Gtk::CAN_FOCUS);
-	solo.unset_flags (Gtk::CAN_FOCUS);
-	invert.unset_flags (Gtk::CAN_FOCUS);
+	cut.set_can_focus (false);
+	dim.set_can_focus (false);
+	solo.set_can_focus (false);
+	invert.set_can_focus (false);
 }
 
 void

@@ -81,7 +81,6 @@ bool AudioSource::_build_peakfiles = false;
 
 AudioSource::AudioSource (Session& s, const string& name)
 	: Source (s, DataType::AUDIO, name)
-	, _length (0)
 	, _peak_byte_max (0)
 	, _peaks_built (false)
 	, _peakfile_fd (-1)
@@ -98,7 +97,6 @@ AudioSource::AudioSource (Session& s, const string& name)
 
 AudioSource::AudioSource (Session& s, const XMLNode& node)
 	: Source (s, node)
-	, _length (0)
 	, _peak_byte_max (0)
 	, _peaks_built (false)
 	, _peakfile_fd (-1)
@@ -124,7 +122,7 @@ AudioSource::~AudioSource ()
 		cerr << "AudioSource destroyed with leftover peak data pending" << endl;
 	}
 
-	if ((-1) != _peakfile_fd) {
+	if (-1 != _peakfile_fd) {
 		close (_peakfile_fd);
 		_peakfile_fd = -1;
 	}
@@ -133,7 +131,7 @@ AudioSource::~AudioSource ()
 }
 
 XMLNode&
-AudioSource::get_state ()
+AudioSource::get_state () const
 {
 	XMLNode& node (Source::get_state());
 
@@ -151,23 +149,15 @@ AudioSource::set_state (const XMLNode& node, int /*version*/)
 	return 0;
 }
 
-bool
-AudioSource::empty () const
-{
-        return _length == 0;
-}
-
-samplecnt_t
-AudioSource::length (samplepos_t /*pos*/) const
-{
-	return _length;
-}
-
 void
-AudioSource::update_length (samplecnt_t len)
+AudioSource::update_length (timepos_t const & dur)
 {
-	if (len > _length) {
-		_length = len;
+	assert (_length.time_domain() == dur.time_domain());
+
+	/* audio files cannot get smaller via this mechanism */
+
+	if (dur > _length) {
+		_length = dur;
 	}
 }
 
@@ -271,7 +261,7 @@ AudioSource::initialize_peakfile (const string& audio_path, const bool in_sessio
 
 		/* we found it in the peaks dir, so check it out */
 
-		if (statbuf.st_size == 0 || (statbuf.st_size < (off_t) ((length(_natural_position) / _FPP) * sizeof (PeakData)))) {
+		if (statbuf.st_size == 0 || (statbuf.st_size < (off_t) ((length().samples() / _FPP) * sizeof (PeakData)))) {
 			DEBUG_TRACE(DEBUG::Peaks, string_compose("Peakfile %1 is empty\n", _peakpath));
 			_peaks_built = false;
 		} else {
@@ -318,14 +308,21 @@ AudioSource::read (Sample *dst, samplepos_t start, samplecnt_t cnt, int /*channe
 {
 	assert (cnt >= 0);
 
-	Glib::Threads::Mutex::Lock lm (_lock);
+	/* as odd as it may seem, given that this method is used to *read* the
+	 * source, that we would need a write lock here. The problem is that
+	 * the audio file API we use (libsndfile) does not allow concurrent use
+	 * of the same SNDFILE object, even for reading. Consequently, even
+	 * readers must be serialized.
+	 */
+
+	WriterLock lm (_lock);
 	return read_unlocked (dst, start, cnt);
 }
 
 samplecnt_t
 AudioSource::write (Sample *dst, samplecnt_t cnt)
 {
-	Glib::Threads::Mutex::Lock lm (_lock);
+	WriterLock lm (_lock);
 	/* any write makes the file not removable */
 	_flags = Flag (_flags & ~Removable);
 	return write_unlocked (dst, cnt);
@@ -345,7 +342,7 @@ int
 AudioSource::read_peaks_with_fpp (PeakData *peaks, samplecnt_t npeaks, samplepos_t start, samplecnt_t cnt,
 				  double samples_per_visual_peak, samplecnt_t samples_per_file_peak) const
 {
-	Glib::Threads::Mutex::Lock lm (_lock);
+	WriterLock lm (_lock);
 
 #if 0 // DEBUG ONLY
 	/* Bypass peak-file cache, compute peaks using raw data from source */
@@ -425,7 +422,7 @@ AudioSource::read_peaks_with_fpp (PeakData *peaks, samplecnt_t npeaks, samplepos
 		 *
 		 */
 
-		const off_t expected_file_size = (_length / (double) samples_per_file_peak) * sizeof (PeakData);
+		const off_t expected_file_size = (_length.samples() / (double) samples_per_file_peak) * sizeof (PeakData);
 
 		if (statbuf.st_size < expected_file_size) {
 			warning << string_compose (_("peak file %1 is truncated from %2 to %3"), _peakpath, expected_file_size, statbuf.st_size) << endmsg;
@@ -457,9 +454,9 @@ AudioSource::read_peaks_with_fpp (PeakData *peaks, samplecnt_t npeaks, samplepos
 
 	/* fix for near-end-of-file conditions */
 
-	if (cnt + start > _length) {
+	if (cnt + start > _length.samples()) {
 		// cerr << "too close to end @ " << _length << " given " << start << " + " << cnt << " (" << _length - start << ")" << endl;
-		cnt = std::max ((samplecnt_t)0, _length - start);
+		cnt = std::max ((samplecnt_t)0, _length.samples() - start);
 		read_npeaks = min ((samplecnt_t) floor (cnt / samples_per_visual_peak), npeaks);
 		zero_fill = npeaks - read_npeaks;
 		expected_peaks = (cnt / (double) samples_per_file_peak);
@@ -704,9 +701,9 @@ AudioSource::read_peaks_with_fpp (PeakData *peaks, samplecnt_t npeaks, samplepos
 
 			if (i == samples_read) {
 
-				to_read = min (chunksize, (samplecnt_t)(_length - current_sample));
+				to_read = min (chunksize, (samplecnt_t)(_length.samples() - current_sample));
 
-				if (current_sample >= _length) {
+				if (current_sample >= _length.samples()) {
 
 					/* hmm, error condition - we've reached the end of the file
 					 * without generating all the peak data. cook up a zero-filled
@@ -719,7 +716,7 @@ AudioSource::read_peaks_with_fpp (PeakData *peaks, samplecnt_t npeaks, samplepos
 
 				} else {
 
-					to_read = min (chunksize, (_length - current_sample));
+					to_read = min (chunksize, (_length.samples() - current_sample));
 
 
 					if ((samples_read = read_unlocked (raw_staging.get(), current_sample, to_read)) == 0) {
@@ -772,14 +769,14 @@ AudioSource::build_peaks_from_scratch ()
 	{
 		/* hold lock while building peaks */
 
-		Glib::Threads::Mutex::Lock lp (_lock);
+		WriterLock lp (_lock);
 
 		if (prepare_for_peakfile_writes ()) {
 			goto out;
 		}
 
 		samplecnt_t current_sample = 0;
-		samplecnt_t cnt = _length;
+		samplecnt_t cnt = _length.samples();
 
 		_peaks_built = false;
 		boost::scoped_array<Sample> buf(new Sample[bufsize]);
@@ -837,8 +834,8 @@ AudioSource::build_peaks_from_scratch ()
 int
 AudioSource::close_peakfile ()
 {
-	Glib::Threads::Mutex::Lock lp (_lock);
-	if (_peakfile_fd >= 0) {
+	WriterLock lp (_lock);
+	if (-1 != _peakfile_fd) {
 		close (_peakfile_fd);
 		_peakfile_fd = -1;
 	}
@@ -856,7 +853,7 @@ AudioSource::prepare_for_peakfile_writes ()
 		return -1;
 	}
 
-	if ((_peakfile_fd = g_open (_peakpath.c_str(), O_CREAT|O_RDWR, 0664)) < 0) {
+	if ((_peakfile_fd = g_open (_peakpath.c_str(), O_CREAT|O_RDWR, 0664)) == -1) {
 		error << string_compose(_("AudioSource: cannot open _peakpath (c) \"%1\" (%2)"), _peakpath, strerror (errno)) << endmsg;
 		return -1;
 	}
@@ -867,7 +864,7 @@ void
 AudioSource::done_with_peakfile_writes (bool done)
 {
 	if (_session.deletion_in_progress() || _session.peaks_cleanup_in_progres()) {
-		if (_peakfile_fd) {
+		if (-1 != _peakfile_fd) {
 			close (_peakfile_fd);
 			_peakfile_fd = -1;
 		}
@@ -878,8 +875,10 @@ AudioSource::done_with_peakfile_writes (bool done)
 		compute_and_write_peaks (0, 0, 0, true, false, _FPP);
 	}
 
-	close (_peakfile_fd);
-	_peakfile_fd = -1;
+	if (-1 != _peakfile_fd) {
+		close (_peakfile_fd);
+		_peakfile_fd = -1;
+	}
 
 	if (done) {
 		Glib::Threads::Mutex::Lock lm (_peaks_ready_lock);
@@ -910,7 +909,7 @@ AudioSource::compute_and_write_peaks (Sample* buf, samplecnt_t first_sample, sam
 	off_t first_peak_byte;
 	boost::scoped_array<Sample> buf2;
 
-	if (_peakfile_fd < 0) {
+	if (-1 == _peakfile_fd) {
 		if (prepare_for_peakfile_writes ()) {
 			return -1;
 		}
@@ -961,7 +960,7 @@ AudioSource::compute_and_write_peaks (Sample* buf, samplecnt_t first_sample, sam
 			goto restart;
 		}
 
-		/* else ... had leftovers, but they immediately preceed the new data, so just
+		/* else ... had leftovers, but they immediately precede the new data, so just
 		   merge them and compute.
 		*/
 
@@ -1089,7 +1088,7 @@ AudioSource::compute_and_write_peaks (Sample* buf, samplecnt_t first_sample, sam
 void
 AudioSource::truncate_peakfile ()
 {
-	if (_peakfile_fd < 0) {
+	if (-1 == _peakfile_fd) {
 		error << string_compose (_("programming error: %1"), "AudioSource::truncate_peakfile() called without open peakfile descriptor")
 		      << endmsg;
 		return;
@@ -1112,7 +1111,7 @@ samplecnt_t
 AudioSource::available_peaks (double zoom_factor) const
 {
 	if (zoom_factor < _FPP) {
-		return length(_natural_position); // peak data will come from the audio file
+		return _length.samples(); // peak data will come from the audio file
 	}
 
 	/* peak data comes from peakfile, but the filesize might not represent
@@ -1127,7 +1126,7 @@ AudioSource::available_peaks (double zoom_factor) const
 }
 
 void
-AudioSource::mark_streaming_write_completed (const Lock& lock)
+AudioSource::mark_streaming_write_completed (const WriterLock& lock)
 {
 	Glib::Threads::Mutex::Lock lm (_peaks_ready_lock);
 

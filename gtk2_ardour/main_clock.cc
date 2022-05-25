@@ -21,6 +21,9 @@
  */
 
 #include "pbd/unwind.h"
+
+#include "ardour/audioengine.h"
+#include "ardour/session.h"
 #include "ardour/tempo.h"
 
 #include "actions.h"
@@ -89,12 +92,12 @@ MainClock::build_ops_menu ()
 	ops_items.push_back (SeparatorElem());
 
 	ops_items.push_back (MenuElem (_("Edit Tempo"), sigc::mem_fun(*this, &MainClock::edit_current_tempo)));
-	ops_items.push_back (MenuElem (_("Edit Meter"), sigc::mem_fun(*this, &MainClock::edit_current_meter)));
+	ops_items.push_back (MenuElem (_("Edit Time Signature"), sigc::mem_fun(*this, &MainClock::edit_current_meter)));
 	ops_items.push_back (MenuElem (_("Insert Tempo Change"), sigc::mem_fun(*this, &MainClock::insert_new_tempo)));
-	ops_items.push_back (MenuElem (_("Insert Meter Change"), sigc::mem_fun(*this, &MainClock::insert_new_meter)));
+	ops_items.push_back (MenuElem (_("Insert Time Signature Change"), sigc::mem_fun(*this, &MainClock::insert_new_meter)));
 }
 
-samplepos_t
+timepos_t
 MainClock::absolute_time () const
 {
 	if (get_is_duration ()) {
@@ -105,7 +108,7 @@ MainClock::absolute_time () const
 }
 
 void
-MainClock::set (samplepos_t when, bool force, ARDOUR::samplecnt_t /*offset*/)
+MainClock::set (timepos_t const & when, bool force, timecnt_t const & /*offset*/)
 {
 	ClockDeltaMode mode;
 	if (_primary) {
@@ -113,21 +116,22 @@ MainClock::set (samplepos_t when, bool force, ARDOUR::samplecnt_t /*offset*/)
 	} else {
 		mode = UIConfiguration::instance().get_secondary_clock_delta_mode ();
 	}
-	if (!PublicEditor::instance().session()) {
+
+	if (!AudioEngine::instance()->session()) {
 		mode = NoDelta;
 	}
 
 	switch (mode) {
 		case NoDelta:
-			AudioClock::set (when, force, 0);
+			AudioClock::set (when, force);
 			break;
 		case DeltaEditPoint:
-			AudioClock::set (when, force, PublicEditor::instance().get_preferred_edit_position (Editing::EDIT_IGNORE_PHEAD));
+			AudioClock::set (when, force, timecnt_t (PublicEditor::instance().get_preferred_edit_position (Editing::EDIT_IGNORE_PHEAD)));
 			break;
 		case DeltaOriginMarker:
 			{
-				Location* loc = PublicEditor::instance().session()->locations()->clock_origin_location ();
-				AudioClock::set (when, force, loc ? loc->start() : 0);
+				Location* loc = AudioEngine::instance()->session()->locations()->clock_origin_location ();
+				AudioClock::set (when, force, loc ? timecnt_t (loc->start()) : timecnt_t());
 			}
 			break;
 	}
@@ -150,16 +154,14 @@ void
 MainClock::edit_current_tempo ()
 {
 	if (!PublicEditor::instance().session()) return;
-	ARDOUR::TempoSection* ts = const_cast<ARDOUR::TempoSection*>(&PublicEditor::instance().session()->tempo_map().tempo_section_at_sample (absolute_time()));
-	PublicEditor::instance().edit_tempo_section (ts);
+	PublicEditor::instance().edit_tempo_section (Temporal::TempoMap::use()->metric_at (absolute_time()).get_editable_tempo());
 }
 
 void
 MainClock::edit_current_meter ()
 {
 	if (!PublicEditor::instance().session()) return;
-	ARDOUR::MeterSection* ms = const_cast<ARDOUR::MeterSection*>(&PublicEditor::instance().session()->tempo_map().meter_section_at_sample (absolute_time()));
-	PublicEditor::instance().edit_meter_section (ms);
+	PublicEditor::instance().edit_meter_section (Temporal::TempoMap::use()->metric_at (absolute_time()).get_editable_meter());
 }
 
 void

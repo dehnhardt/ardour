@@ -625,7 +625,7 @@ EngineControl::build_full_control_notebook ()
 	row++;
 
 	input_channels.set_name ("InputChannels");
-	input_channels.set_flags (Gtk::CAN_FOCUS);
+	input_channels.set_can_focus ();
 	input_channels.set_digits (0);
 	input_channels.set_wrap (false);
 	output_channels.set_editable (true);
@@ -638,7 +638,7 @@ EngineControl::build_full_control_notebook ()
 	}
 
 	output_channels.set_name ("OutputChannels");
-	output_channels.set_flags (Gtk::CAN_FOCUS);
+	output_channels.set_can_focus ();
 	output_channels.set_digits (0);
 	output_channels.set_wrap (false);
 	output_channels.set_editable (true);
@@ -650,7 +650,7 @@ EngineControl::build_full_control_notebook ()
 		++row;
 	}
 
-	/* Prefere next available vertical slot, 1 row */
+	/* Prefer next available vertical slot, 1 row */
 	if (btn < row && !autostart_packed) {
 		basic_packer.attach (try_autostart_button, 3, 4, btn, btn + 1, xopt, xopt);
 		btn++;
@@ -658,7 +658,7 @@ EngineControl::build_full_control_notebook ()
 	}
 
 	input_latency.set_name ("InputLatency");
-	input_latency.set_flags (Gtk::CAN_FOCUS);
+	input_latency.set_can_focus ();
 	input_latency.set_digits (0);
 	input_latency.set_wrap (false);
 	input_latency.set_editable (true);
@@ -671,7 +671,7 @@ EngineControl::build_full_control_notebook ()
 	++row;
 
 	output_latency.set_name ("OutputLatency");
-	output_latency.set_flags (Gtk::CAN_FOCUS);
+	output_latency.set_can_focus ();
 	output_latency.set_digits (0);
 	output_latency.set_wrap (false);
 	output_latency.set_editable (true);
@@ -1089,7 +1089,7 @@ EngineControl::backend_changed ()
 	string backend_name = backend_combo.get_active_text();
 	boost::shared_ptr<ARDOUR::AudioBackend> backend;
 
-	if (!(backend = ARDOUR::AudioEngine::instance()->set_backend (backend_name, downcase (std::string(PROGRAM_NAME)), ""))) {
+	if (!(backend = ARDOUR::AudioEngine::instance()->set_backend (backend_name, ARDOUR_COMMAND_LINE::backend_client_name, ""))) {
 		/* eh? setting the backend failed... how ? */
 		/* A: stale config contains a backend that does not exist in current build */
 		return;
@@ -2021,7 +2021,7 @@ EngineControl::maybe_display_saved_state ()
 }
 
 XMLNode&
-EngineControl::get_state ()
+EngineControl::get_state () const
 {
 	LocaleGuard lg;
 
@@ -2259,7 +2259,7 @@ EngineControl::set_current_state (const State& state)
 
 	boost::shared_ptr<ARDOUR::AudioBackend> backend;
 
-	if (!(backend = ARDOUR::AudioEngine::instance ()->set_backend (state->backend, downcase (std::string (PROGRAM_NAME)), ""))) {
+	if (!(backend = ARDOUR::AudioEngine::instance ()->set_backend (state->backend, ARDOUR_COMMAND_LINE::backend_client_name, ""))) {
 		DEBUG_ECONTROL (string_compose ("Unable to set backend to %1", state->backend));
 		// this shouldn't happen as the invalid backend names should have been
 		// removed from the list of states.
@@ -3056,9 +3056,11 @@ EngineControl::check_audio_latency_measurement ()
 	}
 
 	if (mtdm->inv ()) {
+		/* only warn user, in some cases the measured value is correct,
+		 * regardless of the warning - https://github.com/Ardour/ardour/pull/656
+		 */
 		strcat (buf, " ");
 		strcat (buf, _("(inverted - bad wiring)"));
-		solid = false;
 	}
 
 	lm_results.set_markup (string_compose (results_markup, buf));

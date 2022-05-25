@@ -27,9 +27,13 @@
 #include "pbd/debug_rt_alloc.h"
 #include "pbd/pthread_utils.h"
 
+#include "temporal/superclock.h"
+#include "temporal/tempo.h"
+
 #include "ardour/audioengine.h"
 #include "ardour/debug.h"
 #include "ardour/graph.h"
+#include "ardour/io_plug.h"
 #include "ardour/process_thread.h"
 #include "ardour/route.h"
 #include "ardour/session.h"
@@ -62,18 +66,13 @@ Graph::Graph (Session& session)
 	, _callback_start_sem ("graph_start", 0)
 	, _callback_done_sem ("graph_done", 0)
 	, _graph_empty (true)
-	, _current_chain (0)
-	, _pending_chain (0)
-	, _setup_chain (1)
+	, _graph_chain (0)
 {
 	g_atomic_int_set (&_terminal_refcnt, 0);
 	g_atomic_int_set (&_terminate, 0);
 	g_atomic_int_set (&_n_workers, 0);
 	g_atomic_int_set (&_idle_thread_cnt, 0);
 	g_atomic_int_set (&_trigger_queue_size, 0);
-
-	_n_terminal_nodes[0] = 0;
-	_n_terminal_nodes[1] = 0;
 
 	/* pre-allocate memory */
 	_trigger_queue.reserve (1024);
@@ -108,9 +107,6 @@ Graph::reset_thread_list ()
 	uint32_t num_threads = how_many_dsp_threads ();
 	guint    n_workers   = g_atomic_uint_get (&_n_workers);
 
-	/* For now, we shouldn't be using the graph code if we only have 1 DSP thread */
-	assert (num_threads > 1);
-
 	/* don't bother doing anything here if we already have the right
 	 * number of threads.
 	 */
@@ -143,25 +139,26 @@ Graph::reset_thread_list ()
 	}
 }
 
+uint32_t
+Graph::n_threads () const
+{
+	return 1 + g_atomic_uint_get (&_n_workers);
+}
+
 void
 Graph::session_going_away ()
 {
 	drop_threads ();
 
-	// now drop all references on the nodes.
-	_nodes_rt[0].clear ();
-	_nodes_rt[1].clear ();
-	_init_trigger_list[0].clear ();
-	_init_trigger_list[1].clear ();
+	/* now drop all references on the nodes. */
 	g_atomic_int_set (&_trigger_queue_size, 0);
 	_trigger_queue.clear ();
+	_graph_chain = 0;
 }
 
 void
 Graph::drop_threads ()
 {
-	Glib::Threads::Mutex::Lock ls (_swap_mutex);
-
 	/* Flag threads to terminate */
 	g_atomic_int_set (&_terminate, 1);
 
@@ -200,64 +197,31 @@ Graph::drop_threads ()
 #endif
 }
 
-/* special case route removal -- called from Session::remove_routes */
-void
-Graph::clear_other_chain ()
-{
-	Glib::Threads::Mutex::Lock ls (_swap_mutex);
-
-	while (1) {
-		if (_setup_chain != _pending_chain) {
-			for (node_list_t::iterator ni = _nodes_rt[_setup_chain].begin (); ni != _nodes_rt[_setup_chain].end (); ++ni) {
-				(*ni)->_activation_set[_setup_chain].clear ();
-			}
-
-			_nodes_rt[_setup_chain].clear ();
-			_init_trigger_list[_setup_chain].clear ();
-			break;
-		}
-		/* setup chain == pending chain - we have
-		 * to wait till this is no longer true.
-		 */
-		_cleanup_cond.wait (_swap_mutex);
-	}
-}
-
 void
 Graph::prep ()
 {
-	if (_swap_mutex.trylock ()) {
-		/* swap mutex acquired */
-		if (_current_chain != _pending_chain) {
-			/* use new chain */
-			_setup_chain   = _current_chain;
-			_current_chain = _pending_chain;
-			/* ensure that all nodes can be queued */
-			_trigger_queue.reserve (_nodes_rt[_current_chain].size ());
-			assert (g_atomic_uint_get (&_trigger_queue_size) == 0);
-			_cleanup_cond.signal ();
-		}
-		_swap_mutex.unlock ();
-	}
-
+	assert (_graph_chain);
 	_graph_empty = true;
 
-	int chain = _current_chain;
-
 	node_list_t::iterator i;
-	for (i = _nodes_rt[chain].begin (); i != _nodes_rt[chain].end (); ++i) {
-		(*i)->prep (chain);
+	for (auto const& i : _graph_chain->_nodes_rt) {
+		i->prep (_graph_chain);
 		_graph_empty = false;
 	}
 
-	assert (_graph_empty != (_n_terminal_nodes[chain] > 0));
+	assert (g_atomic_uint_get (&_trigger_queue_size) == 0);
+	assert (_graph_empty != (_graph_chain->_n_terminal_nodes > 0));
 
-	g_atomic_int_set (&_terminal_refcnt, _n_terminal_nodes[chain]);
+	if (_trigger_queue.capacity () < _graph_chain->_nodes_rt.size ()) {
+		_trigger_queue.reserve (_graph_chain->_nodes_rt.size ());
+	}
+
+	g_atomic_int_set (&_terminal_refcnt, _graph_chain->_n_terminal_nodes);
 
 	/* Trigger the initial nodes for processing, which are the ones at the `input' end */
-	for (i = _init_trigger_list[chain].begin (); i != _init_trigger_list[chain].end (); i++) {
+	for (auto const& i : _graph_chain->_init_trigger_list) {
 		g_atomic_int_inc (&_trigger_queue_size);
-		_trigger_queue.push_back (i->get ());
+		_trigger_queue.push_back (i.get ());
 	}
 }
 
@@ -310,85 +274,13 @@ Graph::reached_terminal_node ()
 		 *  - Reset terminal reference count
 		 *  - queue initial nodes
 		 */
-		prep ();
+		prep (); // XXX
 
 		if (_graph_empty && !g_atomic_int_get (&_terminate)) {
 			goto again;
 		}
 		/* .. continue in worker-thread */
 	}
-}
-
-/** Rechain our stuff using a list of routes (which can be in any order) and
- *  a directed graph of their interconnections, which is guaranteed to be
- *  acyclic.
- */
-void
-Graph::rechain (boost::shared_ptr<RouteList> routelist, GraphEdges const& edges)
-{
-	Glib::Threads::Mutex::Lock ls (_swap_mutex);
-
-	int chain = _setup_chain;
-	DEBUG_TRACE (DEBUG::Graph, string_compose ("============== setup %1\n", chain));
-
-	/* This will become the number of nodes that do not feed any other node;
-	 * once we have processed this number of those nodes, we have finished.
-	 */
-	_n_terminal_nodes[chain] = 0;
-
-	/* This will become a list of nodes that are not fed by another node, ie
-	 * those at the `input' end.
-	 */
-	_init_trigger_list[chain].clear ();
-
-	_nodes_rt[chain].clear ();
-
-	/* Clear things out, and make _nodes_rt[chain] a copy of routelist */
-	for (RouteList::iterator ri = routelist->begin (); ri != routelist->end (); ri++) {
-		(*ri)->_init_refcount[chain] = 0;
-		(*ri)->_activation_set[chain].clear ();
-		_nodes_rt[chain].push_back (*ri);
-	}
-
-	// now add refs for the connections.
-
-	for (node_list_t::iterator ni = _nodes_rt[chain].begin (); ni != _nodes_rt[chain].end (); ni++) {
-		boost::shared_ptr<Route> r = boost::dynamic_pointer_cast<Route> (*ni);
-
-		/* The routes that are directly fed by r */
-		set<GraphVertex> fed_from_r = edges.from (r);
-
-		/* Hence whether r has an output */
-		bool const has_output = !fed_from_r.empty ();
-
-		/* Set up r's activation set */
-		for (set<GraphVertex>::iterator i = fed_from_r.begin (); i != fed_from_r.end (); ++i) {
-			r->_activation_set[chain].insert (*i);
-		}
-
-		/* r has an input if there are some incoming edges to r in the graph */
-		bool const has_input = !edges.has_none_to (r);
-
-		/* Increment the refcount of any route that we directly feed */
-		for (node_set_t::iterator ai = r->_activation_set[chain].begin (); ai != r->_activation_set[chain].end (); ai++) {
-			(*ai)->_init_refcount[chain] += 1;
-		}
-
-		if (!has_input) {
-			/* no input, so this node needs to be triggered initially to get things going */
-			_init_trigger_list[chain].push_back (*ni);
-		}
-
-		if (!has_output) {
-			/* no output, so this is one of the nodes that we can count off to decide
-			 * if we've finished
-			 */
-			_n_terminal_nodes[chain] += 1;
-		}
-	}
-
-	_pending_chain = chain;
-	dump (chain);
 }
 
 /** Called by both the main thread and all helpers. */
@@ -425,6 +317,10 @@ Graph::run_one ()
 		DEBUG_TRACE (DEBUG::ProcessThreads, string_compose ("%1 goes to sleep\n", pthread_name ()));
 		_execution_sem.wait ();
 
+		/* update the thread-local tempo map ptr */
+
+		Temporal::TempoMap::fetch ();
+
 		if (g_atomic_int_get (&_terminate)) {
 			return;
 		}
@@ -439,7 +335,7 @@ Graph::run_one ()
 
 	/* Process the graph-node */
 	g_atomic_int_dec_and_test (&_trigger_queue_size);
-	to_run->run (_current_chain);
+	to_run->run (_graph_chain);
 
 	DEBUG_TRACE (DEBUG::ProcessThreads, string_compose ("%1 has finished run_one()\n", pthread_name ()));
 }
@@ -465,6 +361,9 @@ Graph::helper_thread ()
 	resume_rt_malloc_checks ();
 
 	pt->get_buffers ();
+
+	/* just in case we need the thread local tempo map ptr before anything else */
+	Temporal::TempoMap::fetch ();
 
 	while (!g_atomic_int_get (&_terminate)) {
 		run_one ();
@@ -499,6 +398,7 @@ Graph::main_thread ()
 	/* Wait for initial process callback */
 again:
 	_callback_start_sem.wait ();
+	Temporal::TempoMap::fetch ();
 
 	DEBUG_TRACE (DEBUG::ProcessThreads, "main thread is awake\n");
 
@@ -527,85 +427,8 @@ again:
 	delete (pt);
 }
 
-void
-Graph::dump (int chain) const
-{
-#ifndef NDEBUG
-	node_list_t::const_iterator ni;
-	node_set_t::const_iterator  ai;
-
-	chain = _pending_chain;
-
-	DEBUG_TRACE (DEBUG::Graph, "--------------------------------------------Graph dump:\n");
-	for (ni = _nodes_rt[chain].begin (); ni != _nodes_rt[chain].end (); ni++) {
-		boost::shared_ptr<Route> rp = boost::dynamic_pointer_cast<Route> (*ni);
-		DEBUG_TRACE (DEBUG::Graph, string_compose ("GraphNode: %1  refcount: %2\n", rp->name ().c_str (), (*ni)->_init_refcount[chain]));
-		for (ai = (*ni)->_activation_set[chain].begin (); ai != (*ni)->_activation_set[chain].end (); ai++) {
-			DEBUG_TRACE (DEBUG::Graph, string_compose ("  triggers: %1\n", boost::dynamic_pointer_cast<Route> (*ai)->name ().c_str ()));
-		}
-	}
-
-	DEBUG_TRACE (DEBUG::Graph, "------------- trigger list:\n");
-	for (ni = _init_trigger_list[chain].begin (); ni != _init_trigger_list[chain].end (); ni++) {
-		DEBUG_TRACE (DEBUG::Graph, string_compose ("GraphNode: %1  refcount: %2\n", boost::dynamic_pointer_cast<Route> (*ni)->name ().c_str (), (*ni)->_init_refcount[chain]));
-	}
-
-	DEBUG_TRACE (DEBUG::Graph, string_compose ("final activation refcount: %1\n", _n_terminal_nodes[chain]));
-#endif
-}
-
-bool
-Graph::plot (std::string const& file_name) const
-{
-	Glib::Threads::Mutex::Lock ls (_swap_mutex);
-	int chain = _current_chain;
-
-	node_list_t::const_iterator ni;
-	node_set_t::const_iterator  ai;
-	stringstream ss;
-
-	ss << "digraph {\n";
-	ss << "  node [shape = ellipse];\n";
-
-	for (ni = _nodes_rt[chain].begin (); ni != _nodes_rt[chain].end (); ni++) {
-		boost::shared_ptr<Route> sr = boost::dynamic_pointer_cast<Route> (*ni);
-		std::string sn = string_compose ("%1 (%2)", sr->name (), (*ni)->_init_refcount[chain]);
-		if ((*ni)->_init_refcount[chain] == 0 && (*ni)->_activation_set[chain].size() == 0) {
-				ss << "  \"" << sn << "\"[style=filled,fillcolor=gold1];\n";
-		} else if ((*ni)->_init_refcount[chain] == 0) {
-				ss << "  \"" << sn << "\"[style=filled,fillcolor=lightskyblue1];\n";
-		} else if ((*ni)->_activation_set[chain].size() == 0) {
-				ss << "  \"" << sn << "\"[style=filled,fillcolor=aquamarine2];\n";
-		}
-		for (ai = (*ni)->_activation_set[chain].begin (); ai != (*ni)->_activation_set[chain].end (); ai++) {
-			boost::shared_ptr<Route> dr = boost::dynamic_pointer_cast<Route> (*ai);
-			std::string dn = string_compose ("%1 (%2)", dr->name (), (*ai)->_init_refcount[chain]);
-			bool sends_only = false;
-			sr->direct_feeds_according_to_reality (dr, &sends_only);
-			if (sends_only) {
-				ss << "  edge [style=dashed];\n";
-			}
-			ss << "  \"" << sn << "\" -> \"" << dn << "\"\n";
-			if (sends_only) {
-				ss << "  edge [style=solid];\n";
-			}
-		}
-	}
-	ss << "}\n";
-
-	GError *err = NULL;
-	if (!g_file_set_contents (file_name.c_str(), ss.str().c_str(), -1, &err)) {
-		if (err) {
-			error << string_compose (_("Could not graph to file (%1)"), err->message) << endmsg;
-			g_error_free (err);
-		}
-		return false;
-	}
-	return true;
-}
-
 int
-Graph::process_routes (pframes_t nframes, samplepos_t start_sample, samplepos_t end_sample, bool& need_butler)
+Graph::process_routes (boost::shared_ptr<GraphChain> chain, pframes_t nframes, samplepos_t start_sample, samplepos_t end_sample, bool& need_butler)
 {
 	DEBUG_TRACE (DEBUG::ProcessThreads, string_compose ("graph execution from %1 to %2 = %3\n", start_sample, end_sample, nframes));
 
@@ -613,6 +436,7 @@ Graph::process_routes (pframes_t nframes, samplepos_t start_sample, samplepos_t 
 		return 0;
 	}
 
+	_graph_chain          = chain.get ();
 	_process_nframes      = nframes;
 	_process_start_sample = start_sample;
 	_process_end_sample   = end_sample;
@@ -632,7 +456,7 @@ Graph::process_routes (pframes_t nframes, samplepos_t start_sample, samplepos_t 
 }
 
 int
-Graph::routes_no_roll (pframes_t nframes, samplepos_t start_sample, samplepos_t end_sample, bool non_rt_pending)
+Graph::routes_no_roll (boost::shared_ptr<GraphChain> chain, pframes_t nframes, samplepos_t start_sample, samplepos_t end_sample, bool non_rt_pending)
 {
 	DEBUG_TRACE (DEBUG::ProcessThreads, string_compose ("no-roll graph execution from %1 to %2 = %3\n", start_sample, end_sample, nframes));
 
@@ -640,6 +464,7 @@ Graph::routes_no_roll (pframes_t nframes, samplepos_t start_sample, samplepos_t 
 		return 0;
 	}
 
+	_graph_chain            = chain.get ();
 	_process_nframes        = nframes;
 	_process_start_sample   = start_sample;
 	_process_end_sample     = end_sample;
@@ -656,6 +481,28 @@ Graph::routes_no_roll (pframes_t nframes, samplepos_t start_sample, samplepos_t 
 
 	return _process_retval;
 }
+
+int
+Graph::process_io_plugs (boost::shared_ptr<GraphChain> chain, pframes_t nframes, samplepos_t start_sample)
+{
+	DEBUG_TRACE (DEBUG::ProcessThreads, string_compose ("IOPlug graph execution at %1 for %2\n", start_sample, nframes));
+
+	if (g_atomic_int_get (&_terminate)) {
+		return 0;
+	}
+
+	_graph_chain          = chain.get ();
+	_process_nframes      = nframes;
+	_process_start_sample = start_sample;
+
+	DEBUG_TRACE (DEBUG::ProcessThreads, "wake graph for IOPlug processing\n");
+	_callback_start_sem.signal ();
+	_callback_done_sem.wait ();
+	DEBUG_TRACE (DEBUG::ProcessThreads, "graph execution complete\n");
+
+	return _process_retval;
+}
+
 void
 Graph::process_one_route (Route* route)
 {
@@ -677,12 +524,166 @@ Graph::process_one_route (Route* route)
 	}
 
 	if (need_butler) {
-		_process_need_butler = true;
+		_process_need_butler = true; // -> atomic
 	}
+}
+
+void
+Graph::process_one_ioplug (IOPlug* ioplug)
+{
+	ioplug->run (_process_start_sample, _process_nframes);
 }
 
 bool
 Graph::in_process_thread () const
 {
 	return AudioEngine::instance ()->in_process_thread ();
+}
+
+/* ****************************************************************************/
+
+GraphChain::GraphChain (GraphNodeList const& nodelist, GraphEdges const& edges)
+{
+	DEBUG_TRACE (DEBUG::Graph, string_compose ("GraphChain constructed in thread:%1\n", pthread_name ()));
+	/* This will become the number of nodes that do not feed any other node;
+	 * once we have processed this number of those nodes, we have finished.
+	 */
+	_n_terminal_nodes = 0;
+
+	/* This will become a list of nodes that are not fed by another node, ie
+	 * those at the `input' end.
+	 */
+	_init_trigger_list.clear ();
+
+	_nodes_rt.clear ();
+
+	/* copy nodelist to _nodes_rt, prepare GraphNodes for this graph */
+	for (auto const& ri : nodelist) {
+		RCUWriter<GraphActivision::ActivationMap>         wa (ri->_activation_set);
+		RCUWriter<GraphActivision::RefCntMap>             wr (ri->_init_refcount);
+		boost::shared_ptr<GraphActivision::ActivationMap> ma (wa.get_copy ());
+		boost::shared_ptr<GraphActivision::RefCntMap>     mr (wr.get_copy ());
+		(*mr)[this] = 0;
+		(*ma)[this].clear ();
+		_nodes_rt.push_back (ri);
+	}
+
+	/* now add refs for the connections. */
+	for (auto const& ni : _nodes_rt) {
+		/* The nodes that are directly fed by ni */
+		set<GraphVertex> fed_from_r = edges.from (ni);
+
+		/* Hence whether ni has an output, or is otherwise a terminal node */
+		bool const has_output = !fed_from_r.empty ();
+
+		/* Set up ni's activation set */
+		if (has_output) {
+			boost::shared_ptr<GraphActivision::ActivationMap> m (ni->_activation_set.reader ());
+			for (auto const& i : fed_from_r) {
+				auto it = (*m)[this].insert (i);
+				assert (it.second);
+
+				/* Increment the refcount of any node that we directly feed */
+				boost::shared_ptr<GraphActivision::RefCntMap> a ((*it.first)->_init_refcount.reader ());
+				(*a)[this] += 1;
+			}
+		}
+
+		/* ni has an input if there are some incoming edges to r in the graph */
+		bool const has_input = !edges.has_none_to (ni);
+
+		if (!has_input) {
+			/* no input, so this node needs to be triggered initially to get things going */
+			_init_trigger_list.push_back (ni);
+		}
+
+		if (!has_output) {
+			/* no output, so this is one of the nodes that we can count off to decide
+			 * if we've finished
+			 */
+			_n_terminal_nodes += 1;
+		}
+	}
+	dump ();
+}
+
+GraphChain::~GraphChain ()
+{
+	/* clear chain */
+	DEBUG_TRACE (DEBUG::Graph, string_compose ("~GraphChain destroyed in thread:%1\n", pthread_name ()));
+	for (auto const& ni : _nodes_rt) {
+		RCUWriter<GraphActivision::ActivationMap>         wa (ni->_activation_set);
+		RCUWriter<GraphActivision::RefCntMap>             wr (ni->_init_refcount);
+		boost::shared_ptr<GraphActivision::ActivationMap> ma (wa.get_copy ());
+		boost::shared_ptr<GraphActivision::RefCntMap>     mr (wr.get_copy ());
+		mr->erase (this);
+		ma->erase (this);
+	}
+}
+
+bool
+GraphChain::plot (std::string const& file_name) const
+{
+	node_list_t::const_iterator ni;
+	node_set_t::const_iterator  ai;
+	stringstream                ss;
+
+	ss << "digraph {\n";
+	ss << "  node [shape = ellipse];\n";
+
+	for (auto const& ni : _nodes_rt) {
+		std::string sn = string_compose ("%1 (%2)", ni->graph_node_name (), ni->init_refcount (this));
+		if (ni->init_refcount (this) == 0 && ni->activation_set (this).size () == 0) {
+			ss << "  \"" << sn << "\"[style=filled,fillcolor=gold1];\n";
+		} else if (ni->init_refcount (this) == 0) {
+			ss << "  \"" << sn << "\"[style=filled,fillcolor=lightskyblue1];\n";
+		} else if (ni->activation_set (this).size () == 0) {
+			ss << "  \"" << sn << "\"[style=filled,fillcolor=aquamarine2];\n";
+		}
+		for (auto const& ai : ni->activation_set (this)) {
+			std::string dn         = string_compose ("%1 (%2)", ai->graph_node_name (), ai->init_refcount (this));
+			bool        sends_only = false;
+			ni->direct_feeds_according_to_reality (ai, &sends_only);
+			if (sends_only) {
+				ss << "  edge [style=dashed];\n";
+			}
+			ss << "  \"" << sn << "\" -> \"" << dn << "\"\n";
+			if (sends_only) {
+				ss << "  edge [style=solid];\n";
+			}
+		}
+	}
+	ss << "}\n";
+
+	GError* err = NULL;
+	if (!g_file_set_contents (file_name.c_str (), ss.str ().c_str (), -1, &err)) {
+		if (err) {
+			error << string_compose (_("Could not graph to file (%1)"), err->message) << endmsg;
+			g_error_free (err);
+		}
+		return false;
+	}
+	return true;
+}
+
+void
+GraphChain::dump () const
+{
+#ifndef NDEBUG
+	DEBUG_TRACE (DEBUG::Graph, "--8<-- Graph dump ----------------------------\n");
+	for (auto const& ni : _nodes_rt) {
+		DEBUG_TRACE (DEBUG::Graph, string_compose ("GraphNode: %1  refcount: %2\n", ni->graph_node_name (), ni->init_refcount (this)));
+		for (auto const& ai : ni->activation_set (this)) {
+			DEBUG_TRACE (DEBUG::Graph, string_compose ("  triggers: %1\n", ai->graph_node_name ()));
+		}
+	}
+
+	DEBUG_TRACE (DEBUG::Graph, " --- trigger list ---\n");
+	for (auto const& ni : _init_trigger_list) {
+		DEBUG_TRACE (DEBUG::Graph, string_compose ("GraphNode: %1  refcount: %2\n", ni->graph_node_name (), ni->init_refcount (this)));
+	}
+
+	DEBUG_TRACE (DEBUG::Graph, string_compose ("final activation refcount: %1\n", _n_terminal_nodes));
+	DEBUG_TRACE (DEBUG::Graph, "-->8-- END Graph dump ------------------------\n");
+#endif
 }

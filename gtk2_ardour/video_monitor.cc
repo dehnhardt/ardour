@@ -51,7 +51,7 @@ VideoMonitor::VideoMonitor (PublicEditor *ed, std::string xjadeo_bin_path)
 	starting = 0;
 	osdmode = 10; // 1: frameno, 2: timecode, 8: box
 
-	process = new ARDOUR::SystemExec(xjadeo_bin_path, X_("-R -J"));
+	process = new ARDOUR::SystemExec (xjadeo_bin_path, X_("-R -J"), true);
 	process->ReadStdout.connect_same_thread (*this, boost::bind (&VideoMonitor::parse_output, this, _1 ,_2));
 	process->Terminated.connect (*this, invalidator (*this), boost::bind (&VideoMonitor::terminated, this), gui_context());
 	XJKeyEvent.connect (*this, invalidator (*this), boost::bind (&VideoMonitor::forward_keyevent, this, _1), gui_context());
@@ -59,12 +59,9 @@ VideoMonitor::VideoMonitor (PublicEditor *ed, std::string xjadeo_bin_path)
 
 VideoMonitor::~VideoMonitor ()
 {
-	if (clock_connection.connected()) {
-		clock_connection.disconnect();
-	}
-	if (state_connection.connected()) {
-		state_connection.disconnect();
-	}
+	clock_connection.disconnect();
+	state_connection.disconnect();
+
 	delete process;
 }
 

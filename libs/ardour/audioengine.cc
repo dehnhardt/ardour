@@ -41,6 +41,9 @@
 #include "pbd/pthread_utils.h"
 #include "pbd/unknown_type.h"
 
+#include "temporal/superclock.h"
+#include "temporal/tempo.h"
+
 #include "midi++/port.h"
 #include "midi++/mmc.h"
 
@@ -86,7 +89,6 @@ AudioEngine::AudioEngine ()
 	, monitor_check_interval (INT32_MAX)
 	, last_monitor_check (0)
 	, _processed_samples (-1)
-	, m_meter_thread (0)
 	, _main_thread (0)
 	, _mtdm (0)
 	, _mididm (0)
@@ -196,6 +198,7 @@ AudioEngine::sample_rate_change (pframes_t nframes)
 	}
 
 	SampleRateChanged (nframes); /* EMIT SIGNAL */
+	Temporal::set_sample_rate (nframes);
 
 #ifdef SILENCE_AFTER_SECONDS
 	_silence_countdown = nframes * SILENCE_AFTER_SECONDS;
@@ -207,6 +210,7 @@ AudioEngine::sample_rate_change (pframes_t nframes)
 int
 AudioEngine::buffer_size_change (pframes_t bufsiz)
 {
+	Glib::Threads::Mutex::Lock pl (_process_lock);
 	set_port_buffer_sizes (bufsiz);
 
 	if (_session) {
@@ -285,6 +289,14 @@ AudioEngine::process_callback (pframes_t nframes)
 		thread_init_callback (NULL);
 	}
 
+	Temporal::TempoMap::WritableSharedPtr current_map = Temporal::TempoMap::read ();
+	if (current_map != Temporal::TempoMap::use()) {
+		Temporal::TempoMap::set (current_map);
+		if (_session) {
+			_session->tempo_map_changed ();
+		}
+	}
+
 	/* This is for JACK, where the latency callback arrives in sync with
 	 * port registration (usually while ardour holds the process-lock
 	 * or with _adding_routes_in_progress or _route_deletion_in_progress set,
@@ -292,7 +304,7 @@ AudioEngine::process_callback (pframes_t nframes)
 	 *
 	 * Note: this must be done without holding the _process_lock
 	 */
-	if (_session) {
+	if (_session && !_session->processing_blocked ()) {
 		bool lp = false;
 		bool lc = false;
 		if (g_atomic_int_compare_and_exchange (&_pending_playback_latency_callback, 1, 0)) {
@@ -302,14 +314,32 @@ AudioEngine::process_callback (pframes_t nframes)
 			lc = true;
 		}
 		if (lp || lc) {
-			tm.release ();
-			if (lp) {
-				_session->update_latency (true);
+			/* synchronize with Session::processing_blocked
+			 * This lock is not contended by this thread, but acts
+			 * as barrier for Session::block_processing (Session::write_one_track).
+			 */
+			Glib::Threads::Mutex::Lock ll (_latency_lock, Glib::Threads::TRY_LOCK);
+			/* re-check after talking latency-lock */
+			if (!ll.locked () || _session->processing_blocked ()) {
+				if (lc) {
+					queue_latency_update (false);
+				}
+				if (lp) {
+					queue_latency_update (true);
+				}
+			} else {
+				/* release process-lock to call Session::update_latency */
+				tm.release ();
+				if (lc) {
+					_session->update_latency (false);
+				}
+				if (lp) {
+					_session->update_latency (true);
+				}
+				/* release latency lock, **before** reacquiring process-lock */
+				ll.release ();
+				tm.acquire ();
 			}
-			if (lc) {
-				_session->update_latency (false);
-			}
-			tm.acquire ();
 		}
 	}
 
@@ -657,7 +687,7 @@ AudioEngine::do_reset_backend()
 			// backup the device name
 			std::string name = _backend->device_name ();
 
-			std::cout << "AudioEngine::RESET::Reseting device..." << std::endl;
+			std::cout << "AudioEngine::RESET::Resetting device..." << std::endl;
 			if ( ( 0 == stop () ) &&
 					( 0 == _backend->reset_device () ) &&
 					( 0 == start () ) ) {
@@ -729,13 +759,13 @@ AudioEngine::start_hw_event_processing()
 	if (_hw_reset_event_thread == 0) {
 		g_atomic_int_set (&_hw_reset_request_count, 0);
 		g_atomic_int_set (&_stop_hw_reset_processing, 0);
-		_hw_reset_event_thread = Glib::Threads::Thread::create (boost::bind (&AudioEngine::do_reset_backend, this));
+		_hw_reset_event_thread = PBD::Thread::create (boost::bind (&AudioEngine::do_reset_backend, this));
 	}
 
 	if (_hw_devicelist_update_thread == 0) {
 		g_atomic_int_set (&_hw_devicelist_update_count, 0);
 		g_atomic_int_set (&_stop_hw_devicelist_processing, 0);
-		_hw_devicelist_update_thread = Glib::Threads::Thread::create (boost::bind (&AudioEngine::do_devicelist_update, this));
+		_hw_devicelist_update_thread = PBD::Thread::create (boost::bind (&AudioEngine::do_devicelist_update, this));
 	}
 }
 
@@ -1165,7 +1195,7 @@ AudioEngine::client_real_time_priority ()
 		/* this is only an issue with the Dummy backend.
 		 * - with JACK, we require rt permissions.
 		 * - with ALSA/Pulseaudio this can only happen if rt permissions
-		 *   are n/a. Other atempts to get rt will fail likewise.
+		 *   are n/a. Other attempts to get rt will fail likewise.
 		 *
 		 * perhaps:
 		 * TODO: use is_realtime () ? PBD_SCHED_FIFO : PBD_SCHED_OTHER
@@ -1225,6 +1255,9 @@ samplecnt_t
 AudioEngine::sample_rate () const
 {
 	if (!_backend) {
+		if (_session) {
+			return _session->nominal_sample_rate ();
+		}
 		return 0;
 	}
 	return _backend->sample_rate ();
@@ -1426,6 +1459,8 @@ AudioEngine::thread_init_callback (void* arg)
 	PBD::notify_event_loops_about_thread_creation (pthread_self(), thread_name, 4096);
 	AsyncMIDIPort::set_process_thread (pthread_self());
 
+	Temporal::TempoMap::fetch ();
+
 	if (arg) {
 		delete AudioEngine::instance()->_main_thread;
 		/* the special thread created/managed by the backend */
@@ -1448,6 +1483,9 @@ AudioEngine::freewheel_callback (bool onoff)
 {
 	DEBUG_TRACE (DEBUG::BackendCallbacks, string_compose (X_("freewheel callback onoff %1\n"), onoff));
 	_freewheeling = onoff;
+	if (!_freewheeling) {
+		PortManager::reinit ();
+	}
 }
 
 void
@@ -1463,7 +1501,13 @@ AudioEngine::latency_callback (bool for_playback)
 		 * async to connect/disconnect or port creation/deletion.
 		 * All is fine.
 		 */
-		_session->update_latency (for_playback);
+		Glib::Threads::Mutex::Lock ll (_latency_lock, Glib::Threads::TRY_LOCK);
+		if (!ll.locked () || _session->processing_blocked ()) {
+		 /* Except Session::write_one_track() might just have called block_processing() */
+			queue_latency_update (for_playback);
+		} else {
+			_session->update_latency (for_playback);
+		}
 	} else {
 		/* However jack 1/2 emit the callback in sync with creating the port
 		 * (or while handling the connection change).

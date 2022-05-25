@@ -55,6 +55,7 @@ uint32_t Canvas::tooltip_timeout_msecs = 750;
 /** Construct a new Canvas */
 Canvas::Canvas ()
 	: _root (this)
+	, _queue_draw_frozen (0)
 	, _bg_color (Gtkmm2ext::rgba_to_color (0, 1.0, 0.0, 1.0))
 	, _last_render_start_timestamp(0)
 	, _use_intermediate_surface (false)
@@ -108,6 +109,9 @@ Canvas::zoomed ()
 	pick_current_item (0); // no current mouse position
 }
 
+static bool debug_render = false;
+#define CANVAS_DEBUG
+
 /** Render an area of the canvas.
  *  @param area Area in window coordinates.
  *  @param context Cairo context to render to.
@@ -120,11 +124,11 @@ Canvas::render (Rect const & area, Cairo::RefPtr<Cairo::Context> const & context
 	_last_render_start_timestamp = g_get_monotonic_time();
 
 #ifdef CANVAS_DEBUG
-	if (DEBUG_ENABLED(PBD::DEBUG::CanvasRender)) {
+	if (debug_render || DEBUG_ENABLED(PBD::DEBUG::CanvasRender)) {
 		cerr << this << " RENDER: " << area << endl;
-		//cerr << "CANVAS @ " << this << endl;
-		//dump (cerr);
-		//cerr << "-------------------------\n";
+		 cerr << "CANVAS @ " << this << endl;
+		 dump (cerr);
+		 cerr << "-------------------------\n";
 	}
 #endif
 
@@ -133,6 +137,7 @@ Canvas::render (Rect const & area, Cairo::RefPtr<Cairo::Context> const & context
 	Rect root_bbox = _root.bounding_box();
 	if (!root_bbox) {
 		/* the root has no bounding box, so there's nothing to render */
+		cerr << "no bbox\n";
 		return;
 	}
 
@@ -226,6 +231,25 @@ Canvas::dump (ostream& o) const
 	_root.dump (o);
 }
 
+void
+Canvas::freeze_queue_draw ()
+{
+	_queue_draw_frozen++;
+}
+
+void
+Canvas::thaw_queue_draw ()
+{
+	if (_queue_draw_frozen) {
+		_queue_draw_frozen--;
+
+		if (_queue_draw_frozen == 0 && !frozen_area.empty()) {
+			request_redraw (frozen_area);
+			frozen_area = Rect();
+		}
+	}
+}
+
 /** Called when an item has been shown or hidden.
  *  @param item Item that has been shown or hidden.
  */
@@ -234,6 +258,11 @@ Canvas::item_shown_or_hidden (Item* item)
 {
 	Rect bbox = item->bounding_box ();
 	if (bbox) {
+		if (_queue_draw_frozen) {
+			frozen_area = frozen_area.extend (compute_draw_item_area (item, bbox));
+			return;
+		}
+
 		if (item->item_to_window (bbox).intersection (visible_area ())) {
 			queue_draw_item_area (item, bbox);
 		}
@@ -325,7 +354,9 @@ Canvas::window_to_canvas (Duple const & d) const
 			   only group.
 			*/
 			if (!best_group || sg->sensitivity() > best_group->sensitivity()) {
+
 				best_group = sg;
+
 				if (sg->sensitivity() == (ScrollGroup::ScrollsVertically | ScrollGroup::ScrollsHorizontally)) {
 					/* Can't do any better than this. */
 					break;
@@ -334,7 +365,7 @@ Canvas::window_to_canvas (Duple const & d) const
 		}
 	}
 
-	if (best_group) {
+	if (best_group && (!have_grab() || grab_can_translate ())) {
 		return d.translate (best_group->scroll_offset());
 	}
 
@@ -410,7 +441,48 @@ Canvas::item_moved (Item* item, Rect pre_change_parent_bounding_box)
 void
 Canvas::queue_draw_item_area (Item* item, Rect area)
 {
-	request_redraw (item->item_to_window (area));
+	request_redraw (compute_draw_item_area (item, area));
+}
+
+Rect
+Canvas::compute_draw_item_area (Item* item, Rect area)
+{
+	Rect r;
+
+	if ((area.width()) > 1.0 && (area.height() > 1.0)) {
+		/* item has a rectangular bounding box, which may fall
+		 * on non-integer locations. Expand it appropriately.
+		 */
+		r = item->item_to_window (area, false);
+		r.x0 = floor (r.x0);
+		r.y0 = floor (r.y0);
+		r.x1 = ceil (r.x1);
+		r.y1 = ceil (r.y1);
+		//std::cerr << "redraw box, adjust from " << area << " to " << r << std::endl;
+	} else if (area.width() > 1.0 && area.height() == 1.0) {
+		/* horizontal line, which may fall on non-integer
+		 * coordinates.
+		 */
+		r = item->item_to_window (area, false);
+		r.y0 = floor (r.y0);
+		r.y1 = ceil (r.y1);
+		//std::cerr << "redraw HLine, adjust from " << area << " to " << r << std::endl;
+	} else if (area.width() == 1.0 && area.height() > 1.0) {
+		/* vertical single pixel line, which may fall on non-integer
+		 * coordinates
+		 */
+		r = item->item_to_window (area, false);
+		r.x0 = floor (r.x0);
+		r.x1 = ceil (r.x1);
+		//std::cerr << "redraw VLine, adjust from " << area << " to " << r << std::endl;
+
+	} else {
+		/* impossible? one of width or height must be zero ... */
+		//std::cerr << "redraw IMPOSSIBLE of " << area  << std::endl;
+		r =  item->item_to_window (area, false);
+	}
+
+	return r;
 }
 
 void
@@ -450,6 +522,7 @@ GtkCanvas::GtkCanvas ()
 	, current_tooltip_item (0)
 	, tooltip_window (0)
 	, _in_dtor (false)
+	, resize_queued (false)
 	, _nsglview (0)
 {
 #ifdef USE_CAIRO_IMAGE_SURFACE /* usually Windows builds */
@@ -468,7 +541,7 @@ void
 GtkCanvas::use_nsglview ()
 {
 	assert (!_nsglview);
-	assert (!is_realized());
+	assert (!get_realized());
 #ifdef ARDOUR_CANVAS_NSVIEW_TAG // patched gdkquartz.h
 	_nsglview = Gtkmm2ext::nsglview_create (this);
 #endif
@@ -518,9 +591,9 @@ GtkCanvas::pick_current_item (Duple const & point, int state)
 	if (DEBUG_ENABLED(PBD::DEBUG::CanvasEnterLeave)) {
 		for (vector<Item const*>::const_iterator it = items.begin(); it != items.end(); ++it) {
 #ifdef CANVAS_DEBUG
-			std::cerr << "\tItem " << (*it)->whatami() << '/' << (*it)->name << " ignore events ? " << (*it)->ignore_events() << " vis ? " << (*it)->visible() << std::endl;
+			// std::cerr << "\tItem " << (*it)->whatami() << '/' << (*it)->name << " ignore events ? " << (*it)->ignore_events() << " vis ? " << (*it)->visible() << std::endl;
 #else
-			std::cerr << "\tItem " << (*it)->whatami() << '/' << " ignore events ? " << (*it)->ignore_events() << " vis ? " << (*it)->visible() << std::endl;
+			// std::cerr << "\tItem " << (*it)->whatami() << '/' << " ignore events ? " << (*it)->ignore_events() << " vis ? " << (*it)->visible() << std::endl;
 #endif
 		}
 	}
@@ -624,7 +697,7 @@ GtkCanvas::deliver_enter_leave (Duple const & point, int state)
 		if (_current_item) {
 
 			/* no current item, so also send virtual leave events to the
-			 * entire heirarchy for the current item
+			 * entire hierarchy for the current item
 			 */
 
 			for (i = _current_item->parent(); i ; i = i->parent()) {
@@ -637,7 +710,7 @@ GtkCanvas::deliver_enter_leave (Duple const & point, int state)
 		enter_detail = GDK_NOTIFY_UNKNOWN;
 
 		/* no current item, so also send virtual enter events to the
-		 * entire heirarchy for the new item
+		 * entire hierarchy for the new item
 		 */
 
 		for (i = _new_current_item->parent(); i ; i = i->parent()) {
@@ -650,7 +723,7 @@ GtkCanvas::deliver_enter_leave (Duple const & point, int state)
 		 * inferior ("child") of _new_current_item")
 		 *
 		 * Deliver "virtual" leave notifications to all items in the
-		 * heirarchy between current and new_current.
+		 * hierarchy between current and new_current.
 		 */
 
 		for (i = _current_item->parent(); i && i != _new_current_item; i = i->parent()) {
@@ -665,7 +738,7 @@ GtkCanvas::deliver_enter_leave (Duple const & point, int state)
 		 * an inferior ("child") of _current_item")
 		 *
 		 * Deliver "virtual" enter notifications to all items in the
-		 * heirarchy between current and new_current.
+		 * hierarchy between current and new_current.
 		 */
 
 		for (i = _new_current_item->parent(); i && i != _current_item; i = i->parent()) {
@@ -704,6 +777,10 @@ GtkCanvas::deliver_enter_leave (Duple const & point, int state)
 		leave_event.detail = leave_detail;
 		_current_item->Event ((GdkEvent*)&leave_event);
 		DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("LEAVE %1/%2\n", _current_item->whatami(), _current_item->name));
+	}
+
+	if (_current_item == current_tooltip_item) {
+		hide_tooltip ();
 	}
 
 	leave_event.detail = GDK_NOTIFY_VIRTUAL;
@@ -850,6 +927,9 @@ GtkCanvas::on_realize ()
 		Gtkmm2ext::nsglview_overlay (_nsglview, get_window()->gobj());
 	}
 #endif
+
+	_root.set_fill (false);
+	_root.set_outline (false);
 }
 
 void
@@ -873,6 +953,12 @@ GtkCanvas::on_size_allocate (Gtk::Allocation& a)
 	}
 #endif
 
+	/* x, y in a are relative to the parent. When passing this down to the
+	   root group, this origin is effectively 0,0
+	*/
+
+	Rect r (0., 0., a.get_width(), a.get_height());
+	_root.size_allocate (r);
 }
 
 /** Handler for GDK expose events.
@@ -1089,7 +1175,6 @@ GtkCanvas::get_mouse_position (Duple& winpos) const
 	Glib::RefPtr<Gdk::Window> self = Glib::RefPtr<Gdk::Window>::cast_const (get_window ());
 
 	if (!self) {
-		std::cerr << " no self window\n";
 		winpos = Duple (0, 0);
 		return false;
 	}
@@ -1109,8 +1194,6 @@ GtkCanvas::get_mouse_position (Duple& winpos) const
 bool
 GtkCanvas::on_motion_notify_event (GdkEventMotion* ev)
 {
-	hide_tooltip ();
-
 	/* translate event coordinates from window to canvas */
 
 	GdkEvent copy = *((GdkEvent*)ev);
@@ -1330,7 +1413,7 @@ GtkCanvas::start_tooltip_timeout (Item* item)
 {
 	stop_tooltip_timeout ();
 
-	if (item && Gtkmm2ext::PersistentTooltip::tooltips_enabled ()) {
+	if (item && !item->tooltip().empty() && Gtkmm2ext::PersistentTooltip::tooltips_enabled ()) {
 		current_tooltip_item = item;
 
 		/* wait for the first idle that happens after this is
@@ -1448,6 +1531,34 @@ GtkCanvas::get_pango_context ()
 	return Glib::wrap (gdk_pango_context_get());
 }
 
+void
+GtkCanvas::queue_resize ()
+{
+	if (!resize_queued) {
+		Glib::signal_idle().connect (sigc::mem_fun (*this, &GtkCanvas::resize_handler));
+		resize_queued = true;
+	}
+}
+
+bool
+GtkCanvas::resize_handler ()
+{
+	resize_queued = false;
+	_root.layout ();
+	return false;
+}
+
+bool
+GtkCanvas::grab_can_translate () const
+{
+	if (!_grabbed_item) {
+		/* weird, but correct! */
+		return true;
+	}
+
+	return _grabbed_item->scroll_translation ();
+}
+
 /** Create a GtkCanvaSViewport.
  *  @param hadj Adjustment to use for horizontal scrolling.
  *  @param vadj Adjustment to use for vertica scrolling.
@@ -1476,9 +1587,24 @@ GtkCanvasViewport::scrolled ()
 void
 GtkCanvasViewport::on_size_request (Gtk::Requisition* req)
 {
-	/* force the canvas to size itself */
-	// _canvas.root()->bounding_box();
+	Distance width;
+	Distance height;
 
-	req->width = 16;
-	req->height = 16;
+	_canvas.root()->size_request (width, height);
+	_canvas.request_size (Duple (width, height));
+
+	/* special case ArdourCanvas::COORD_MAX (really: no size constraint),
+	 * also limit to cairo constraints determined by coordinates of things
+	 * sent to pixman being in 16.16 format. */
+
+	if (width > 32767) {
+		width = 0;
+	}
+	if (height > 32767) {
+		height = 0;
+	}
+
+	req->width  = std::max<int>(1, width);
+	req->height = std::max<int>(1, height);
+
 }

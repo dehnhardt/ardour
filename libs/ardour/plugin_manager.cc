@@ -87,6 +87,7 @@
 #include "ardour/search_paths.h"
 
 #if (defined WINDOWS_VST_SUPPORT || defined MACVST_SUPPORT || defined LXVST_SUPPORT)
+#include "ardour/system_exec.h"
 #include "ardour/vst2_scan.h"
 #endif
 
@@ -113,6 +114,7 @@
 
 #include "ardour/audio_unit.h"
 #include "ardour/auv2_scan.h"
+#include "ardour/system_exec.h"
 #include <Carbon/Carbon.h>
 #endif
 
@@ -383,7 +385,7 @@ PluginManager::detect_name_ambiguities (PluginInfoList* pil)
 				* by listing number of audio outputs.
 				* This is used in the instrument selector.
 				*/
-			 bool r = p->max_configurable_ouputs () != (*i)->max_configurable_ouputs ();
+			 bool r = p->max_configurable_outputs () != (*i)->max_configurable_outputs ();
 			 p->multichannel_name_ambiguity = r;
 			 (*i)->multichannel_name_ambiguity = r;
 		 }
@@ -1008,7 +1010,7 @@ PluginManager::ladspa_discover (string path)
 			set_tags (info->type, info->unique_id, info->category, info->name, FromPlug);
 			psle->msg (PluginScanLogEntry::OK, string_compose(_("Found LADSPA plugin, id: %1 name: %2, Inputs: %3, Outputs: %4"), info->unique_id, info->name, info->n_inputs, info->n_outputs));
 		} else {
-			psle->msg (PluginScanLogEntry::OK, string_compose(_("LADSPA ignored plugin with dupliucate id %1."), descriptor->UniqueID));
+			psle->msg (PluginScanLogEntry::OK, string_compose(_("LADSPA ignored plugin with duplicate id %1."), descriptor->UniqueID));
 		}
 
 		DEBUG_TRACE (DEBUG::PluginManager, string_compose ("Found LADSPA plugin, id: %1 name: %2, Inputs: %3, Outputs: %4\n",
@@ -1133,7 +1135,6 @@ auv2_whitelist (std::string id)
 {
 	string fn = Glib::build_filename (ARDOUR::user_cache_directory(), AUV2_BLACKLIST);
 	if (!Glib::file_test (fn, Glib::FILE_TEST_EXISTS)) {
-		warning << _("Expected AUv2 Blacklist file does not exist.") << endmsg;
 		return;
 	}
 
@@ -1420,15 +1421,33 @@ PluginManager::au_refresh (bool cache_only)
 
 #if (defined WINDOWS_VST_SUPPORT || defined MACVST_SUPPORT || defined LXVST_SUPPORT)
 
+static bool vst2_is_blacklisted (string const& module_path)
+{
+	string fn = Glib::build_filename (ARDOUR::user_cache_directory (), VST2_BLACKLIST);
+	if (!Glib::file_test (fn, Glib::FILE_TEST_EXISTS)) {
+		return false;
+	}
+
+	std::string bl;
+	try {
+		bl = Glib::file_get_contents (fn);
+	} catch (Glib::FileError const& err) {
+		return false;
+	}
+	return bl.find (module_path + "\n") != string::npos;
+}
+
 static void vst2_blacklist (string const& module_path)
 {
+	if (module_path.empty () || vst2_is_blacklisted (module_path)) {
+		return;
+	}
 	string fn = Glib::build_filename (ARDOUR::user_cache_directory (), VST2_BLACKLIST);
 	FILE* f = NULL;
 	if (! (f = g_fopen (fn.c_str (), "a"))) {
 		PBD::error << string_compose (_("Cannot write to VST2 blacklist file '%1'"), fn) << endmsg;
 		return;
 	}
-	assert (NULL == strchr (module_path.c_str(), '\n'));
 	fprintf (f, "%s\n", module_path.c_str ());
 	::fclose (f);
 }
@@ -1437,7 +1456,6 @@ static void vst2_whitelist (string module_path)
 {
 	string fn = Glib::build_filename (ARDOUR::user_cache_directory (), VST2_BLACKLIST);
 	if (!Glib::file_test (fn, Glib::FILE_TEST_EXISTS)) {
-		PBD::warning << _("Expected VST Blacklist file does not exist.") << endmsg;
 		return;
 	}
 
@@ -1458,22 +1476,6 @@ static void vst2_whitelist (string module_path)
 		return;
 	}
 	Glib::file_set_contents (fn, bl);
-}
-
-static bool vst2_is_blacklisted (string const& module_path)
-{
-	string fn = Glib::build_filename (ARDOUR::user_cache_directory (), VST2_BLACKLIST);
-	if (!Glib::file_test (fn, Glib::FILE_TEST_EXISTS)) {
-		return false;
-	}
-
-	std::string bl;
-	try {
-		bl = Glib::file_get_contents (fn);
-	} catch (Glib::FileError const& err) {
-		return false;
-	}
-	return bl.find (module_path + "\n") != string::npos;
 }
 
 static void vst2_scanner_log (std::string msg, std::stringstream* ss)
@@ -1702,17 +1704,13 @@ PluginManager::vst2_discover (string path, ARDOUR::PluginType type, bool cache_o
 	if (!tree.root()->get_property ("binary", binary) || binary != path) {
 		psle->msg (PluginScanLogEntry::Incompatible, string_compose (_("Invalid VST2 cache file '%1'"), cache_file)); // XXX log as error msg
 		psle->msg (PluginScanLogEntry::Blacklisted);
-		if (!vst2_is_blacklisted (path)) {
-			vst2_blacklist (path);
-		}
+		vst2_blacklist (path);
 		return -1;
 	}
 
 	std::string arch;
 	if (!tree.root()->get_property ("arch", arch) || arch != vst2_arch ()) {
-		if (!vst2_is_blacklisted (path)) {
-			vst2_blacklist (path);
-		}
+		vst2_blacklist (path);
 		psle->msg (PluginScanLogEntry::Blacklisted);
 		psle->msg (PluginScanLogEntry::Incompatible, string_compose (_("VST2 architecture mismatches '%1'"), arch));
 		return -1;

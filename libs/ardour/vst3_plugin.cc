@@ -49,6 +49,7 @@
 
 using namespace PBD;
 using namespace ARDOUR;
+using namespace Temporal;
 using namespace Steinberg;
 using namespace Presonus;
 
@@ -415,19 +416,19 @@ VST3PI::vst3_to_midi_buffers (BufferSet& bufs, ChanMapping const& out_map)
 				mb.push_back (e.sampleOffset, Evoral::MIDI_EVENT, e.data.size, (uint8_t const*)e.data.bytes);
 				break;
 			case Vst::Event::kNoteOffEvent:
-				data[0] = 0x80 | e.noteOff.channel;
+				data[0] = MIDI_CMD_NOTE_OFF | e.noteOff.channel;
 				data[1] = e.noteOff.pitch;
 				data[2] = vst_to_midi (e.noteOff.velocity);
 				mb.push_back (e.sampleOffset, Evoral::MIDI_EVENT, 3, data);
 				break;
 			case Vst::Event::kNoteOnEvent:
-				data[0] = 0x90 | e.noteOn.channel;
+				data[0] = MIDI_CMD_NOTE_ON | e.noteOn.channel;
 				data[1] = e.noteOn.pitch;
 				data[2] = vst_to_midi (e.noteOn.velocity);
 				mb.push_back (e.sampleOffset, Evoral::MIDI_EVENT, 3, data);
 				break;
 			case Vst::Event::kPolyPressureEvent:
-				data[0] = 0xa0 | e.noteOff.channel;
+				data[0] = MIDI_CMD_NOTE_PRESSURE | e.noteOff.channel;
 				data[1] = e.polyPressure.pitch;
 				data[2] = vst_to_midi (e.polyPressure.pressure);
 				mb.push_back (e.sampleOffset, Evoral::MIDI_EVENT, 3, data);
@@ -435,27 +436,27 @@ VST3PI::vst3_to_midi_buffers (BufferSet& bufs, ChanMapping const& out_map)
 			case Vst::Event::kLegacyMIDICCOutEvent:
 				switch (e.midiCCOut.controlNumber) {
 					case Vst::kCtrlPolyPressure:
-						data[0] = 0x0a | e.midiCCOut.channel;
+						data[0] = MIDI_CMD_NOTE_PRESSURE | e.midiCCOut.channel;
 						data[1] = e.midiCCOut.value;
 						data[2] = e.midiCCOut.value2;
 						break;
 					default: /* Control Change */
-						data[0] = 0xb0 | e.midiCCOut.channel;
+						data[0] = MIDI_CMD_CONTROL | e.midiCCOut.channel;
 						data[1] = e.midiCCOut.controlNumber;
 						data[2] = e.midiCCOut.value;
 						break;
 					case Vst::kCtrlProgramChange:
-						data[0] = 0x0c | e.midiCCOut.channel;
+						data[0] = MIDI_CMD_PGM_CHANGE | e.midiCCOut.channel;
 						data[1] = e.midiCCOut.value;
 						data[2] = e.midiCCOut.value2;
 						break;
 					case Vst::kAfterTouch:
-						data[0] = 0x0d | e.midiCCOut.channel;
+						data[0] = MIDI_CMD_CHANNEL_PRESSURE | e.midiCCOut.channel;
 						data[1] = e.midiCCOut.value;
 						data[2] = e.midiCCOut.value2;
 						break;
 					case Vst::kPitchBend:
-						data[0] = 0x0e | e.midiCCOut.channel;
+						data[0] = MIDI_CMD_BENDER | e.midiCCOut.channel;
 						data[1] = e.midiCCOut.value;
 						data[2] = e.midiCCOut.value2;
 						break;
@@ -633,15 +634,14 @@ VST3Plugin::connect_and_run (BufferSet&  bufs,
 	context.systemTime           = g_get_monotonic_time ();
 
 	{
-		TempoMap const&           tmap (_session.tempo_map ());
-		const Tempo&              t (tmap.tempo_at_sample (start));
-		const Timecode::BBT_Time& bbt (tmap.bbt_at_sample_rt (start));
-		const MeterSection&       ms (tmap.meter_section_at_sample (start));
+		TempoMap::SharedPtr tmap (TempoMap::use());
+		const TempoMetric&  metric (tmap->metric_at (start));
+		const BBT_Time&     bbt (metric.bbt_at (timepos_t (start)));
 
-		context.tempo              = t.quarter_notes_per_minute ();
-		context.timeSigNumerator   = ms.divisions_per_bar ();
-		context.timeSigDenominator = ms.note_divisor ();
-		context.projectTimeMusic   = tmap.quarter_note_at_sample_rt (start);
+		context.tempo              = metric.tempo().quarter_notes_per_minute ();
+		context.timeSigNumerator   = metric.meter().divisions_per_bar ();
+		context.timeSigDenominator = metric.meter().note_value ();
+		context.projectTimeMusic   = DoubleableBeats (metric.tempo().quarters_at_sample (start)).to_double();
 		context.barPositionMusic   = bbt.bars * 4; // PPQN, NOT tmap.metric_at(bbt).meter().divisions_per_bar()
 	}
 
@@ -658,10 +658,11 @@ VST3Plugin::connect_and_run (BufferSet&  bufs,
 		Location* looploc = _session.locations ()->auto_loop_location ();
 		try {
 			/* loop start/end in quarter notes */
-			TempoMap const& tmap (_session.tempo_map ());
-			context.cycleStartMusic = tmap.quarter_note_at_sample_rt (looploc->start ());
-			context.cycleEndMusic   = tmap.quarter_note_at_sample_rt (looploc->end ());
-			context.state |= Vst::ProcessContext::kCycleValid;
+
+			TempoMap::SharedPtr tmap (TempoMap::use());
+			context.cycleStartMusic = DoubleableBeats (tmap->quarters_at (looploc->start ())).to_double ();
+			context.cycleEndMusic   = DoubleableBeats (tmap->quarters_at (looploc->end ())).to_double ();
+			 context.state |= Vst::ProcessContext::kCycleValid;
 			context.state |= Vst::ProcessContext::kCycleActive;
 		} catch (...) {
 		}
@@ -730,6 +731,16 @@ VST3Plugin::connect_and_run (BufferSet&  bufs,
 
 	/* handle outgoing MIDI events */
 	if (_plug->n_midi_outputs () > 0 && bufs.count ().n_midi () > 0) {
+		/* clear valid in-place MIDI buffers (forward MIDI otherwise) */
+		in_index = 0;
+		for (int32_t i = 0; i < (int32_t)_plug->n_midi_inputs (); ++i) {
+			bool     valid = false;
+			uint32_t index = in_map.get (DataType::MIDI, in_index++, &valid);
+			if (valid && bufs.count ().n_midi () > index) {
+				bufs.get_midi (index).clear ();
+			}
+		}
+
 		_plug->vst3_to_midi_buffers (bufs, out_map);
 	}
 
@@ -792,8 +803,11 @@ VST3Plugin::load_preset (PresetRecord r)
 std::string
 VST3Plugin::do_save_preset (std::string name)
 {
-	assert (!preset_search_path ().empty ());
-	std::string dir = preset_search_path ().front ();
+	boost::shared_ptr<VST3PluginInfo> nfo = boost::dynamic_pointer_cast<VST3PluginInfo> (get_info ());
+	PBD::Searchpath psp = nfo->preset_search_path ();
+	assert (!psp.empty ());
+
+	std::string dir = psp.front ();
 	std::string fn  = Glib::build_filename (dir, legalize_for_universal_path (name) + ".vstpreset");
 
 	if (g_mkdir_with_parents (dir.c_str (), 0775)) {
@@ -821,8 +835,11 @@ VST3Plugin::do_save_preset (std::string name)
 void
 VST3Plugin::do_remove_preset (std::string name)
 {
-	assert (!preset_search_path ().empty ());
-	std::string dir = preset_search_path ().front ();
+	boost::shared_ptr<VST3PluginInfo> nfo = boost::dynamic_pointer_cast<VST3PluginInfo> (get_info ());
+	PBD::Searchpath psp = nfo->preset_search_path ();
+	assert (!psp.empty ());
+
+	std::string dir = psp.front ();
 	std::string fn  = Glib::build_filename (dir, legalize_for_universal_path (name) + ".vstpreset");
 	::g_unlink (fn.c_str ());
 	std::string uri = string_compose (X_("VST3-S:%1:%2"), unique_id (), PBD::basename_nosuffix (fn));
@@ -844,7 +861,7 @@ VST3Plugin::find_presets ()
 	_preset_uri_map.clear ();
 
 	/* read vst3UnitPrograms */
-	Vst::IUnitInfo* nfo = _plug->unit_info ();
+	IPtr<Vst::IUnitInfo> nfo = _plug->unit_info ();
 	if (nfo && _plug->program_change_port ().id != Vst::kNoParamId) {
 		Vst::UnitID program_unit_id = _plug->program_change_port ().unitId;
 
@@ -908,7 +925,9 @@ VST3Plugin::find_presets ()
 	// TODO check _plug->unit_data()
 	// IUnitData: programDataSupported -> setUnitProgramData (IBStream)
 
-	PBD::Searchpath          psp = preset_search_path ();
+	boost::shared_ptr<VST3PluginInfo> info = boost::dynamic_pointer_cast<VST3PluginInfo> (get_info ());
+	PBD::Searchpath psp = info->preset_search_path ();
+
 	std::vector<std::string> preset_files;
 	find_paths_matching_filter (preset_files, psp, vst3_preset_filter, 0, false, true, false);
 
@@ -923,42 +942,6 @@ VST3Plugin::find_presets ()
 		_presets.insert (make_pair (uri, r));
 		_preset_uri_map[uri] = *i;
 	}
-}
-
-PBD::Searchpath
-VST3Plugin::preset_search_path () const
-{
-	boost::shared_ptr<VST3PluginInfo> nfo = boost::dynamic_pointer_cast<VST3PluginInfo> (get_info ());
-
-	std::string vendor = legalize_for_universal_path (nfo->creator);
-	std::string name   = legalize_for_universal_path (nfo->name);
-
-	/* first listed is used to save custom user-presets */
-	PBD::Searchpath preset_path;
-#ifdef __APPLE__
-	preset_path += Glib::build_filename (Glib::get_home_dir (), "Library/Audio/Presets", vendor, name);
-	preset_path += Glib::build_filename ("/Library/Audio/Presets", vendor, name);
-#elif defined PLATFORM_WINDOWS
-	std::string documents = PBD::get_win_special_folder_path (CSIDL_PERSONAL);
-	if (!documents.empty ()) {
-		preset_path += Glib::build_filename (documents, "VST3 Presets", vendor, name);
-		preset_path += Glib::build_filename (documents, "vst3 presets", vendor, name);
-	}
-
-	preset_path += Glib::build_filename (Glib::get_user_data_dir (), "VST3 Presets", vendor, name);
-
-	std::string appdata = PBD::get_win_special_folder_path (CSIDL_APPDATA);
-	if (!appdata.empty ()) {
-		preset_path += Glib::build_filename (appdata, "VST3 Presets", vendor, name);
-		preset_path += Glib::build_filename (appdata, "vst3 presets", vendor, name);
-	}
-#else
-	preset_path += Glib::build_filename (Glib::get_home_dir (), ".vst3", "presets", vendor, name);
-	preset_path += Glib::build_filename ("/usr/share/vst3/presets", vendor, name);
-	preset_path += Glib::build_filename ("/usr/local/share/vst3/presets", vendor, name);
-#endif
-
-	return preset_path;
 }
 
 /* ****************************************************************************/
@@ -989,9 +972,32 @@ VST3PluginInfo::load (Session& session)
 }
 
 std::vector<Plugin::PresetRecord>
-VST3PluginInfo::get_presets (bool /*user_only*/) const
+VST3PluginInfo::get_presets (bool user_only) const
 {
 	std::vector<Plugin::PresetRecord> p;
+
+	/* This only returns user-presets, which is sufficient for the time
+	 * being. So far only Mixer_UI::sync_treeview_from_favorite_order()
+	 * uses PluginInfo to query presets.
+	 *
+	 * see also VST3Plugin::find_presets
+	 */
+	assert (user_only);
+
+	PBD::Searchpath psp = preset_search_path ();
+	std::vector<std::string> preset_files;
+	find_paths_matching_filter (preset_files, psp, vst3_preset_filter, 0, false, true, false);
+
+	for (std::vector<std::string>::iterator i = preset_files.begin (); i != preset_files.end (); ++i) {
+		bool        is_user     = PBD::path_is_within (psp.front (), *i);
+		std::string preset_name = PBD::basename_nosuffix (*i);
+		std::string uri         = string_compose (X_("VST3-S:%1:%2"), unique_id, preset_name);
+		if (!is_user) {
+			continue;
+		}
+		p.push_back (Plugin::PresetRecord (uri, preset_name, is_user));
+	}
+
 	return p;
 }
 
@@ -1003,6 +1009,40 @@ VST3PluginInfo::is_instrument () const
 	}
 
 	return PluginInfo::is_instrument ();
+}
+
+PBD::Searchpath
+VST3PluginInfo::preset_search_path () const
+{
+	std::string vendor = legalize_for_universal_path (creator);
+	std::string pname  = legalize_for_universal_path (name);
+
+	/* first listed is used to save custom user-presets */
+	PBD::Searchpath preset_path;
+#ifdef __APPLE__
+	preset_path += Glib::build_filename (Glib::get_home_dir (), "Library/Audio/Presets", vendor, pname);
+	preset_path += Glib::build_filename ("/Library/Audio/Presets", vendor, pname);
+#elif defined PLATFORM_WINDOWS
+	std::string documents = PBD::get_win_special_folder_path (CSIDL_PERSONAL);
+	if (!documents.empty ()) {
+		preset_path += Glib::build_filename (documents, "VST3 Presets", vendor, pname);
+		preset_path += Glib::build_filename (documents, "vst3 presets", vendor, pname);
+	}
+
+	preset_path += Glib::build_filename (Glib::get_user_data_dir (), "VST3 Presets", vendor, pname);
+
+	std::string appdata = PBD::get_win_special_folder_path (CSIDL_APPDATA);
+	if (!appdata.empty ()) {
+		preset_path += Glib::build_filename (appdata, "VST3 Presets", vendor, pname);
+		preset_path += Glib::build_filename (appdata, "vst3 presets", vendor, pname);
+	}
+#else
+	preset_path += Glib::build_filename (Glib::get_home_dir (), ".vst3", "presets", vendor, pname);
+	preset_path += Glib::build_filename ("/usr/share/vst3/presets", vendor, pname);
+	preset_path += Glib::build_filename ("/usr/local/share/vst3/presets", vendor, pname);
+#endif
+
+	return preset_path;
 }
 
 /* ****************************************************************************/
@@ -1042,39 +1082,59 @@ VST3PI::VST3PI (boost::shared_ptr<ARDOUR::VST3PluginModule> m, std::string uniqu
 #endif
 
 	if (factory->createInstance (_fuid.toTUID (), Vst::IComponent::iid, (void**)&_component) != kResultTrue) {
+		DEBUG_TRACE (DEBUG::VST3Config, "VST3PI create instance failed\n");
 		throw failed_constructor ();
 	}
 
-	if (_component->initialize (HostApplication::getHostContext ()) != kResultOk) {
+	if (!_component || _component->initialize (HostApplication::getHostContext ()) != kResultOk) {
+		DEBUG_TRACE (DEBUG::VST3Config, "VST3PI component initialize failed\n");
 		throw failed_constructor ();
 	}
 
-	_controller = FUnknownPtr<Vst::IEditController> (_component);
+	_controller = FUnknownPtr<Vst::IEditController> (_component).take ();
+
 	if (!_controller) {
 		TUID controllerCID;
 		if (_component->getControllerClassId (controllerCID) == kResultTrue) {
 			if (factory->createInstance (controllerCID, Vst::IEditController::iid, (void**)&_controller) != kResultTrue) {
-				throw failed_constructor ();
-			}
-			if (_controller && (_controller->initialize (HostApplication::getHostContext ()) != kResultOk)) {
+				_component->terminate ();
+				_component->release ();
 				throw failed_constructor ();
 			}
 		}
 	}
 
 	if (!_controller) {
+		DEBUG_TRACE (DEBUG::VST3Config, "VST3PI no controller was found\n");
 		_component->terminate ();
 		_component->release ();
 		throw failed_constructor ();
 	}
 
+	/* The official Steinberg SDK's source/vst/hosting/plugprovider.cpp
+	 * only initializes the controller if it is separate of the component.
+	 *
+	 * However some plugins expect and unconditional call and other
+	 * hosts incl. JUCE based one initialize a controller separately because
+	 * FUnknownPtr<> cast may return a new obeject.
+	 *
+	 * So do not check for errors.
+	 * if Vst::IEditController is-a Vst::IComponent the Controller
+	 * may or may not already be initialized.
+	 */
+	_controller->initialize (HostApplication::getHostContext ());
+
 	if (_controller->setComponentHandler (this) != kResultOk) {
+		_controller->terminate ();
+		_controller->release ();
 		_component->terminate ();
 		_component->release ();
 		throw failed_constructor ();
 	}
 
 	if (!(_processor = FUnknownPtr<Vst::IAudioProcessor> (_component))) {
+		_controller->terminate ();
+		_controller->release ();
 		_component->terminate ();
 		_component->release ();
 		throw failed_constructor ();
@@ -1178,10 +1238,10 @@ VST3PI::~VST3PI ()
 	terminate ();
 }
 
-Vst::IUnitInfo*
+IPtr<Vst::IUnitInfo>
 VST3PI::unit_info ()
 {
-	Vst::IUnitInfo* nfo = FUnknownPtr<Vst::IUnitInfo> (_component);
+	IPtr<Vst::IUnitInfo> nfo = FUnknownPtr<Vst::IUnitInfo> (_component);
 	if (nfo) {
 		return nfo;
 	}
@@ -1189,7 +1249,7 @@ VST3PI::unit_info ()
 }
 
 #if 0
-Vst::IUnitData*
+IPtr<Vst::IUnitData>
 VST3PI::unit_data ()
 {
 	Vst::IUnitData* iud = FUnknownPtr<Vst::IUnitData> (_component);
@@ -1213,22 +1273,14 @@ VST3PI::terminate ()
 
 	disconnect_components ();
 
-	bool controller_is_component = false;
-	if (_component) {
-		controller_is_component = FUnknownPtr<Vst::IEditController> (_component) != 0;
-		_component->terminate ();
-	}
-
 	if (_controller) {
 		_controller->setComponentHandler (0);
-	}
-
-	if (_controller && controller_is_component == false) {
 		_controller->terminate ();
 		_controller->release ();
 	}
 
 	if (_component) {
+		_component->terminate ();
 		_component->release ();
 	}
 
@@ -1620,7 +1672,7 @@ VST3PI::get_parameter_descriptor (uint32_t port, ParameterDescriptor& desc) cons
 	desc.normal       = _controller->normalizedParamToPlain (id, p.normal);
 	desc.toggled      = 1 == p.steps;
 	desc.logarithmic  = false;
-	desc.integer_step = p.steps > 1 ? p.steps : 0;
+	desc.integer_step = p.steps > 1 && (desc.upper - desc.lower) == p.steps;
 	desc.sr_dependent = false;
 	desc.enumeration  = p.is_enum;
 	desc.label        = p.label;
@@ -1628,6 +1680,9 @@ VST3PI::get_parameter_descriptor (uint32_t port, ParameterDescriptor& desc) cons
 		desc.unit = ARDOUR::ParameterDescriptor::DB;
 	} else if (p.unit == "Hz") {
 		desc.unit = ARDOUR::ParameterDescriptor::HZ;
+	}
+	if (p.steps > 1) {
+		desc.rangesteps = 1 + p.steps;
 	}
 
 	FUnknownPtr<IEditControllerExtra> extra_ctrl (_controller);
@@ -2801,7 +2856,7 @@ VST3PI::beginEditContextInfoValue (FIDString id)
 		return kInvalidArgument;
 	}
 	DEBUG_TRACE (DEBUG::VST3Callbacks, string_compose ("VST3PI::beginEditContextInfoValue %1\n", id));
-	ac->start_touch (ac->session ().transport_sample ());
+	ac->start_touch (timepos_t (ac->session ().transport_sample ()));
 	return kResultOk;
 }
 
@@ -2817,7 +2872,7 @@ VST3PI::endEditContextInfoValue (FIDString id)
 		return kInvalidArgument;
 	}
 	DEBUG_TRACE (DEBUG::VST3Callbacks, string_compose ("VST3PI::endEditContextInfoValue %1\n", id));
-	ac->stop_touch (ac->session ().transport_sample ());
+	ac->stop_touch (timepos_t (ac->session ().transport_sample ()));
 	return kResultOk;
 }
 
@@ -2836,11 +2891,11 @@ VST3PI::psl_subscribe_to (boost::shared_ptr<ARDOUR::AutomationControl> ac, FIDSt
 	}
 
 	DEBUG_TRACE (DEBUG::VST3Callbacks, string_compose ("VST3PI::psl_subscribe_to: %1\n", ac->name ()));
-	ac->Changed.connect_same_thread (_ac_connection_list, boost::bind (&VST3PI::foward_signal, this, nfo2.get (), id));
+	ac->Changed.connect_same_thread (_ac_connection_list, boost::bind (&VST3PI::forward_signal, this, nfo2.get (), id));
 }
 
 void
-VST3PI::foward_signal (IContextInfoHandler2* handler, FIDString id) const
+VST3PI::forward_signal (IContextInfoHandler2* handler, FIDString id) const
 {
 	assert (handler);
 	DEBUG_TRACE (DEBUG::VST3Callbacks, string_compose ("VST3PI::psl_subscribtion AC changed %1\n", id));
@@ -2914,7 +2969,7 @@ VST3PI::try_create_view () const
 		view = _controller->createView (0);
 	}
 	if (!view) {
-		view = FUnknownPtr<IPlugView> (_controller);
+		view = FUnknownPtr<IPlugView> (_controller).take ();
 		if (view) {
 			view->addRef ();
 		}

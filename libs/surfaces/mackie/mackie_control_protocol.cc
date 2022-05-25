@@ -67,6 +67,8 @@
 #include "ardour/audioengine.h"
 #include "ardour/vca_manager.h"
 
+#include "temporal/tempo.h"
+
 #include "mackie_control_protocol.h"
 
 #include "midi_byte_array.h"
@@ -832,6 +834,8 @@ MackieControlProtocol::set_device (const string& device_name, bool force)
 		ARDOUR::AudioEngine::instance()->PortConnectedOrDisconnected.connect (port_connection, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::connection_handler, this, _1, _2, _3, _4, _5), this);
 	}
 
+	build_button_map();
+
 	if (create_surfaces ()) {
 		return -1;
 	}
@@ -1012,7 +1016,7 @@ MackieControlProtocol::close()
  *  contains a state node for the device, it will deleted and replaced.
  */
 void
-MackieControlProtocol::update_configuration_state ()
+MackieControlProtocol::update_configuration_state () const
 {
 	/* CALLER MUST HOLD SURFACES LOCK */
 
@@ -1028,15 +1032,15 @@ MackieControlProtocol::update_configuration_state ()
 
 	XMLNode* snode = new XMLNode (X_("Surfaces"));
 
-	for (Surfaces::iterator s = surfaces.begin(); s != surfaces.end(); ++s) {
-		snode->add_child_nocopy ((*s)->get_state());
+	for (auto const & s : surfaces) {
+		snode->add_child_nocopy (s->get_state());
 	}
 
 	devnode->add_child_nocopy (*snode);
 }
 
 XMLNode&
-MackieControlProtocol::get_state()
+MackieControlProtocol::get_state() const
 {
 	XMLNode& node (ControlProtocol::get_state());
 
@@ -1153,9 +1157,9 @@ MackieControlProtocol::set_state (const XMLNode & node, int version)
 string
 MackieControlProtocol::format_bbt_timecode (samplepos_t now_sample)
 {
-	Timecode::BBT_Time bbt_time;
+	Temporal::BBT_Time bbt_time;
 
-	session->bbt_time (now_sample, bbt_time);
+	bbt_time = Temporal::TempoMap::fetch()->bbt_at (timepos_t (now_sample));
 
 	// The Mackie protocol spec is built around a BBT time display of
 	//
@@ -1501,6 +1505,12 @@ MackieControlProtocol::build_button_map ()
 
 #define DEFINE_BUTTON_HANDLER(b,p,r) button_map.insert (pair<Button::ID,ButtonHandlers> ((b), ButtonHandlers ((p),(r))));
 
+	if(!button_map.empty()) {
+		button_map.clear();
+	}
+
+	build_device_specific_button_map();
+
 	DEFINE_BUTTON_HANDLER (Button::Track, &MackieControlProtocol::track_press, &MackieControlProtocol::track_release);
 	DEFINE_BUTTON_HANDLER (Button::Send, &MackieControlProtocol::send_press, &MackieControlProtocol::send_release);
 	DEFINE_BUTTON_HANDLER (Button::Pan, &MackieControlProtocol::pan_press, &MackieControlProtocol::pan_release);
@@ -1566,6 +1576,38 @@ MackieControlProtocol::build_button_map ()
 	DEFINE_BUTTON_HANDLER (Button::UserA, &MackieControlProtocol::user_a_press, &MackieControlProtocol::user_a_release);
 	DEFINE_BUTTON_HANDLER (Button::UserB, &MackieControlProtocol::user_b_press, &MackieControlProtocol::user_b_release);
 	DEFINE_BUTTON_HANDLER (Button::MasterFaderTouch, &MackieControlProtocol::master_fader_touch_press, &MackieControlProtocol::master_fader_touch_release);
+}
+
+void
+MackieControlProtocol::build_device_specific_button_map()
+{
+	/* this maps our device-dependent button codes to the methods that handle them.
+	 */
+	
+#define DEFINE_BUTTON_HANDLER(b,p,r) button_map.insert (pair<Button::ID,ButtonHandlers> ((b), ButtonHandlers ((p),(r))));
+
+	if (_device_info.is_platformMp()) {
+		DEFINE_BUTTON_HANDLER (Button::Marker, &MackieControlProtocol::flip_window_press, &MackieControlProtocol::flip_window_release);
+	}
+
+	if(_device_info.is_proG2()) {
+		DEFINE_BUTTON_HANDLER (Button::View, &MackieControlProtocol::user_press, &MackieControlProtocol::user_release);
+		DEFINE_BUTTON_HANDLER (Button::Trim, &MackieControlProtocol::send_press, &MackieControlProtocol::send_release);
+		DEFINE_BUTTON_HANDLER (Button::Touch, &MackieControlProtocol::open_press, &MackieControlProtocol::open_release);
+		DEFINE_BUTTON_HANDLER (Button::Latch, &MackieControlProtocol::flip_window_press, &MackieControlProtocol::flip_window_release);
+		DEFINE_BUTTON_HANDLER (Button::Save, &MackieControlProtocol::prog2_vst_press, &MackieControlProtocol::prog2_vst_release);
+		DEFINE_BUTTON_HANDLER (Button::Undo, &MackieControlProtocol::master_press, &MackieControlProtocol::master_release);
+		DEFINE_BUTTON_HANDLER (Button::Cancel, &MackieControlProtocol::prog2_clear_solo_press, &MackieControlProtocol::prog2_clear_solo_release);
+		DEFINE_BUTTON_HANDLER (Button::Enter, &MackieControlProtocol::shift_press, &MackieControlProtocol::shift_release);
+		DEFINE_BUTTON_HANDLER (Button::Marker, &MackieControlProtocol::prog2_left_press, &MackieControlProtocol::prog2_left_release);
+		DEFINE_BUTTON_HANDLER (Button::Nudge, &MackieControlProtocol::prog2_right_press, &MackieControlProtocol::prog2_right_release);
+		DEFINE_BUTTON_HANDLER (Button::Replace, &MackieControlProtocol::prev_marker_press, &MackieControlProtocol::prev_marker_release);
+		DEFINE_BUTTON_HANDLER (Button::Click, &MackieControlProtocol::prog2_marker_press, &MackieControlProtocol::prog2_marker_release);
+		DEFINE_BUTTON_HANDLER (Button::ClearSolo, &MackieControlProtocol::next_marker_press, &MackieControlProtocol::next_marker_release);
+		DEFINE_BUTTON_HANDLER (Button::Shift, &MackieControlProtocol::prog2_undo_press, &MackieControlProtocol::prog2_undo_release);
+		DEFINE_BUTTON_HANDLER (Button::Option, &MackieControlProtocol::redo_press, &MackieControlProtocol::redo_release);
+		DEFINE_BUTTON_HANDLER (Button::Ctrl, &MackieControlProtocol::prog2_save_press, &MackieControlProtocol::prog2_save_release);
+	}
 }
 
 void

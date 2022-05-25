@@ -34,6 +34,8 @@
 #include "ardour/export_handler.h"
 #include "ardour/export_timespan.h"
 
+#include "temporal/tempo.h"
+
 #include "export_timespan_selector.h"
 
 #include "pbd/i18n.h"
@@ -46,7 +48,7 @@ using std::string;
 ExportTimespanSelector::ExportTimespanSelector (ARDOUR::Session * session, ProfileManagerPtr manager, bool multi)
 	: manager (manager)
 	, _realtime_available (false)
-	, time_format_label (_("Show Times as:"), Gtk::ALIGN_LEFT)
+	, time_format_label (_("Show Times as:"), Gtk::ALIGN_START)
 	, realtime_checkbutton (_("Realtime Export"))
 {
 	set_session (session);
@@ -142,7 +144,7 @@ ExportTimespanSelector::location_sorter(Gtk::TreeModel::iterator a, Gtk::TreeMod
 	if (l2 == ls)
 		return +1;
 
-	return l1->start() - l2->start();
+	return l2->start().distance (l1->start()).samples();
 }
 
 void
@@ -157,7 +159,7 @@ ExportTimespanSelector::add_range_to_selection (ARDOUR::Location const * loc, bo
 		id = loc->id().to_s();
 	}
 
-	span->set_range (loc->start(), loc->end());
+	span->set_range (loc->start().samples(), loc->end().samples());
 	span->set_name (loc->name());
 	span->set_range_id (id);
 	span->set_realtime (rt);
@@ -226,8 +228,8 @@ ExportTimespanSelector::construct_label (ARDOUR::Location const * location) cons
 	std::string start;
 	std::string end;
 
-	samplepos_t start_sample = location->start();
-	samplepos_t end_sample = location->end();
+	samplepos_t start_sample = location->start().samples();
+	samplepos_t end_sample = location->end().samples();
 
 	switch (state->time_format) {
 	  case ExportProfileManager::BBT:
@@ -269,23 +271,23 @@ ExportTimespanSelector::construct_length (ARDOUR::Location const * location) con
 
 	switch (state->time_format) {
 	case ExportProfileManager::BBT:
-		s << bbt_str (location->length ());
+		s << bbt_str (location->length ().samples());
 		break;
 
 	case ExportProfileManager::Timecode:
 	{
 		Timecode::Time tc;
-		_session->timecode_duration (location->length(), tc);
+		_session->timecode_duration (location->length().samples(), tc);
 		tc.print (s);
 		break;
 	}
 
 	case ExportProfileManager::MinSec:
-		s << ms_str (location->length ());
+		s << ms_str (location->length ().samples());
 		break;
 
 	case ExportProfileManager::Samples:
-		s << location->length ();
+		s << location->length ().samples();
 		break;
 	}
 
@@ -301,10 +303,11 @@ ExportTimespanSelector::bbt_str (samplepos_t samples) const
 	}
 
 	std::ostringstream oss;
-	Timecode::BBT_Time time;
-	_session->bbt_time (samples, time);
+	Temporal::BBT_Time time;
+	time = Temporal::TempoMap::use()->bbt_at (timepos_t (samples));
 
-	print_padded (oss, time);
+	time.print_padded (oss);
+
 	return oss.str ();
 }
 
@@ -385,6 +388,9 @@ ExportTimespanSelector::set_selection_state_of_all_timespans (bool s)
 	for (Gtk::ListStore::Children::iterator it = range_list->children().begin(); it != range_list->children().end(); ++it) {
 		it->set_value (range_cols.selected, s);
 	}
+
+	update_timespans ();
+	CriticalSelectionChanged ();
 }
 
 /*** ExportTimespanSelectorSingle ***/
@@ -464,10 +470,10 @@ ExportTimespanSelectorSingle::fill_range_list ()
 			row[range_cols.label] = construct_label (*it);
 			row[range_cols.length] = construct_length (*it);
 			//the actual samplecnt_t for sorting
-			row[range_cols.length_actual] = (*it)->length();
+			row[range_cols.length_actual] = (*it)->length().samples();
 
 			//start samplecnt_t for sorting
-			row[range_cols.start] = (*it)->start();
+			row[range_cols.start] = (*it)->start().samples();
 
 			Glib::DateTime gdt(Glib::DateTime::create_now_local ((*it)->timestamp()));
 			row[range_cols.timestamp] = (*it)->timestamp();
@@ -577,10 +583,10 @@ ExportTimespanSelectorMultiple::fill_range_list ()
 		row[range_cols.label] = construct_label (*it);
 		row[range_cols.length] = construct_length (*it);
 		//the actual samplecnt_t for sorting
-		row[range_cols.length_actual] = (*it)->length();
+		row[range_cols.length_actual] = (*it)->length().samples();
 
 		//start samplecnt_t for sorting
-		row[range_cols.start] = (*it)->start();
+		row[range_cols.start] = (*it)->start().samples();
 
 		Glib::DateTime gdt(Glib::DateTime::create_now_local ((*it)->timestamp()));
 		row[range_cols.timestamp] = (*it)->timestamp();

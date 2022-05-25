@@ -225,7 +225,7 @@ Subview::retrieve_pointers(Strip** strip, Pot** vpot, std::string** pending_disp
 
 void Subview::do_parameter_display(std::string& display, const ParameterDescriptor& pd, float param_val, Strip* strip, bool screen_hold)
 {
-	display = Strip::format_paramater_for_display(
+	display = Strip::format_parameter_for_display(
 			pd,
 			param_val,
 			strip->stripable(),
@@ -584,6 +584,7 @@ DynamicsSubview::notify_change (boost::weak_ptr<ARDOUR::AutomationControl> pc, u
 
 SendsSubview::SendsSubview(MackieControlProtocol& mcp, boost::shared_ptr<ARDOUR::Stripable> subview_stripable)
 	: Subview(mcp, subview_stripable)
+	, _current_bank(0)
 {}
 
 SendsSubview::~SendsSubview()
@@ -614,8 +615,8 @@ void SendsSubview::setup_vpot(
 		Pot* vpot,
 		std::string pending_display[2])
 {
-	const uint32_t global_strip_position = _mcp.global_index (*strip);
-	store_pointers(strip, vpot, pending_display, global_strip_position);
+	const uint32_t global_strip_position = _mcp.global_index (*strip) + _current_bank;
+	store_pointers(strip, vpot, pending_display, global_strip_position - _current_bank);
 
 	if (!_subview_stripable) {
 		return;
@@ -649,7 +650,7 @@ SendsSubview::notify_send_level_change (uint32_t global_strip_position, bool for
 	Strip* strip = 0;
 	Pot* vpot = 0;
 	std::string* pending_display = 0;
-	if (!retrieve_pointers(&strip, &vpot, &pending_display, global_strip_position))
+	if (!retrieve_pointers(&strip, &vpot, &pending_display, global_strip_position - _current_bank))
 	{
 		return;
 	}
@@ -672,6 +673,11 @@ SendsSubview::notify_send_level_change (uint32_t global_strip_position, bool for
 
 void SendsSubview::handle_vselect_event(uint32_t global_strip_position)
 {
+	/* adjust global_strip_position to make sure we're accessing the
+	 * correct controllable since we might be banked within the subview.
+	 */
+	global_strip_position += _current_bank;
+
 	/* Send mode: press enables/disables the relevant
 		* send, but the vpot is bound to the send-level so we
 		* need to lookup the enable/disable control
@@ -717,6 +723,36 @@ void SendsSubview::handle_vselect_event(uint32_t global_strip_position)
 	}
 }
 
+bool SendsSubview::handle_cursor_left_press()
+{
+	if (_current_bank >= 1)
+	{
+		_current_bank -= 1;
+	}
+	mcp().redisplay_subview_mode();
+
+	return true;
+}
+
+bool SendsSubview::handle_cursor_right_press()
+{
+	uint32_t num_sends = 0;
+	if (_subview_stripable->send_name(0).size() > 0) {
+		bool more_sends = true;
+		while (more_sends) {
+			if (_subview_stripable->send_name(num_sends).size() > 0) {
+				num_sends++;
+			} else {
+				more_sends = false;
+			}
+		}
+	}
+	if (num_sends > _current_bank + 1) {
+		_current_bank += 1;
+		mcp().redisplay_subview_mode();
+	}
+	return true;
+}
 
 
 TrackViewSubview::TrackViewSubview(MackieControlProtocol& mcp, boost::shared_ptr<ARDOUR::Stripable> subview_stripable)
@@ -996,13 +1032,6 @@ PluginSubviewState::shorten_display_text(const std::string& text, std::string::s
 	return PBD::short_version (text, target_length);
 }
 
-bool PluginSubviewState::handle_cursor_right_press()
-{
-	_current_bank = _current_bank + 1;
-	bank_changed();
-	return true;
-}
-
 bool PluginSubviewState::handle_cursor_left_press()
 {
 	if (_current_bank >= 1)
@@ -1022,6 +1051,7 @@ uint32_t PluginSubviewState::calculate_virtual_strip_position(uint32_t strip_ind
 
 PluginSelect::PluginSelect(PluginSubview& context)
   : PluginSubviewState(context)
+  , _bank_size(_context.mcp().n_strips())
 {}
 
 PluginSelect::~PluginSelect()
@@ -1061,6 +1091,11 @@ void PluginSelect::setup_vpot(
 void PluginSelect::handle_vselect_event(uint32_t global_strip_position,
 		boost::shared_ptr<ARDOUR::Stripable> subview_stripable)
 {
+	/* adjust global_strip_position to make sure we're accessing the
+	 * correct controllable since we might be banked within the subview.
+	 */
+	global_strip_position += _current_bank;
+
 	/* PluginSelect mode: press selects the plugin shown on the strip's LCD */
 	if (!subview_stripable) {
 		return;
@@ -1079,6 +1114,25 @@ void PluginSelect::handle_vselect_event(uint32_t global_strip_position,
 	if (plugin) {
 		_context.set_state (boost::shared_ptr<PluginEdit> (new PluginEdit (_context, boost::weak_ptr<PluginInsert>(plugin))));
 	}
+}
+
+bool PluginSelect::handle_cursor_right_press()
+{
+	boost::shared_ptr<Route> route = boost::dynamic_pointer_cast<Route> (_context.subview_stripable());
+	if (!route) {
+		return true;
+	}
+	boost::shared_ptr<Processor> plugin = route->nth_plugin(0);
+	uint32_t num_plugins = 0;
+	while (plugin) {
+		plugin = route->nth_plugin(++num_plugins);
+	}
+
+	if (num_plugins > (_current_bank + 1) * _bank_size) {
+		_current_bank = _current_bank + 1;
+		bank_changed();
+	}
+	return true;
 }
 
 void PluginSelect::bank_changed()
@@ -1225,6 +1279,15 @@ void PluginEdit::notify_parameter_change(Strip* strip, Pot* vpot, std::string pe
 
 void PluginEdit::handle_vselect_event(uint32_t global_strip_position, boost::shared_ptr<ARDOUR::Stripable> subview_stripable)
 {
+}
+
+bool PluginEdit::handle_cursor_right_press()
+{
+	if (_plugin_input_parameter_indices.size() > (_current_bank + 1) * _bank_size) {
+		_current_bank = _current_bank + 1;
+		bank_changed();
+	}
+	return true;
 }
 
 void PluginEdit::bank_changed()

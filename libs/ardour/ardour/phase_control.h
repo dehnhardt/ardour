@@ -38,7 +38,7 @@ class Session;
 class LIBARDOUR_API PhaseControl : public AutomationControl
 {
   public:
-	PhaseControl (Session& session, std::string const & name);
+	PhaseControl (Session& session, std::string const & name, Temporal::TimeDomain);
 
 	/* There are two approaches to designing/using a PhaseControl. One is
 	 * to have one such control for every channel of the control's
@@ -57,7 +57,7 @@ class LIBARDOUR_API PhaseControl : public AutomationControl
 	void resize (uint32_t);
 
 	int set_state (XMLNode const&, int);
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 
   protected:
 	void actually_set_value (double, PBD::Controllable::GroupControlDisposition group_override);

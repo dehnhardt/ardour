@@ -90,6 +90,9 @@ ExportFormatSelector::update_format_list ()
 		tree_it = format_list->append();
 		tree_it->set_value (format_cols.format, *it);
 		tree_it->set_value (format_cols.label, (*it)->description());
+		if (!format_to_select && (*it)->id ().to_s () == "dd4f6f30-f054-4e0a-8d91-67eed5d79153" /* "Wav (Tagged)" */) {
+			format_to_select = *it;
+		}
 	}
 
 	if (format_combo.get_active_row_number() == -1 && format_combo.get_model()->children().size() > 0) {
@@ -155,6 +158,10 @@ ExportFormatSelector::open_edit_dialog (bool new_dialog)
 {
 	ExportFormatDialog dialog (state->format, new_dialog);
 	dialog.set_session (_session);
+	Gtk::Widget* top = get_toplevel();
+	if (top) {
+		dialog.set_transient_for (*dynamic_cast<Gtk::Window*>(top));
+	}
 	Gtk::ResponseType response = (Gtk::ResponseType) dialog.run();
 	if (response == Gtk::RESPONSE_APPLY) {
 		update_format_description ();

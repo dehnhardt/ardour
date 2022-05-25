@@ -51,7 +51,7 @@ class LIBARDOUR_API Processor : public SessionObject, public Automatable, public
   public:
 	static const std::string state_node_name;
 
-	Processor(Session&, const std::string& name);
+	Processor(Session&, const std::string& name, Temporal::TimeDomain);
 	Processor (const Processor& other);
 
 	virtual ~Processor();
@@ -131,7 +131,7 @@ class LIBARDOUR_API Processor : public SessionObject, public Automatable, public
 	   smoothly.
 	 */
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	virtual void set_pre_fader (bool);
@@ -158,9 +158,10 @@ class LIBARDOUR_API Processor : public SessionObject, public Automatable, public
 	SessionObject* owner() const;
 
 protected:
-	virtual XMLNode& state ();
+	virtual XMLNode& state () const;
 	virtual int set_state_2X (const XMLNode&, int version);
 
+	bool check_active () { return (_active = _pending_active); }
 	bool map_loop_range (samplepos_t& start, samplepos_t& end) const;
 
 	int       _pending_active;

@@ -34,12 +34,14 @@
 #include "pbd/gstdio_compat.h"
 
 #include "pbd/pthread_utils.h"
+#include "pbd/unwind.h"
 
 #include "ardour/audio_track.h"
 #include "ardour/audiofilesource.h"
 #include "ardour/audioplaylist.h"
 #include "ardour/audioregion.h"
 #include "ardour/chan_count.h"
+#include "ardour/clip_library.h"
 #include "ardour/midi_region.h"
 #include "ardour/session.h"
 #include "ardour/session_directory.h"
@@ -82,6 +84,7 @@ void
 Editor::stem_export ()
 {
 	StemExportDialog dialog (*this);
+	PBD::Unwinder<bool> uw (_no_not_select_reimported_tracks, true);
 	dialog.set_session (_session);
 	dialog.run();
 }
@@ -108,7 +111,7 @@ Editor::loudness_assistant_marker ()
 	bool is_start;
 
 	if (((l = find_location_from_marker (marker, is_start)) != 0) && (l->end() > l->start())) {
-		measure_master_loudness (l->start(), l->end(), true);
+		measure_master_loudness (l->start().samples(), l->end().samples(), true);
 	}
 }
 
@@ -118,7 +121,7 @@ Editor::loudness_assistant (bool range_selection)
 	samplepos_t start, end;
 	TimeSelection const& ts (get_selection().time);
 	if (range_selection && !ts.empty ()) {
-		start = ts.start();
+		start = ts.start_sample();
 		end = ts.end_sample();
 	} else {
 		start = _session->current_start_sample();
@@ -158,7 +161,7 @@ Editor::measure_master_loudness (samplepos_t start, samplepos_t end, bool is_ran
 		return;
 	}
 
-	ARDOUR::AudioRange ar (start, end, 0);
+	ARDOUR::TimelineRange ar (timepos_t (start), timepos_t (end), 0);
 
 	LoudnessDialog ld (_session, ar, is_range_selection);
 
@@ -274,13 +277,19 @@ Editor::write_region_selection (RegionSelection& regions)
 void
 Editor::bounce_region_selection (bool with_processing)
 {
+	/* this code is largely similar to editor_ops ::bounce_range_selection */
+
 	/* no need to check for bounceable() because this operation never puts
 	 * its results back in the playlist (only in the region list).
 	 */
 
-	/*prompt the user for a new name*/
 	string bounce_name;
+	bool   copy_to_clip_library = false;
+	bool   copy_to_trigger = false;
+	uint32_t trigger_slot         = 0;
 	{
+		/*prompt the user for a new name*/
+
 		ArdourWidgets::Prompter dialog (true);
 
 		dialog.set_prompt (_("Name for Bounced Region:"));
@@ -289,14 +298,49 @@ Editor::bounce_region_selection (bool with_processing)
 		dialog.set_size_request (400, -1);
 		dialog.set_position (Gtk::WIN_POS_MOUSE);
 
-		dialog.add_button (_("Rename"), RESPONSE_ACCEPT);
+		dialog.add_button (_("Bounce"), RESPONSE_ACCEPT);
 		dialog.set_initial_text (bounce_name);
 
-		Label label;
-		label.set_text (_("Bounced Region will appear in the Source list."));
-		dialog.get_vbox()->set_spacing (8);
-		dialog.get_vbox()->pack_start (label);
-		label.show();
+		Table*  table  = manage (new Table);
+		table->set_spacings (4);
+		table->set_border_width (8);
+		table->set_homogeneous (true);
+		dialog.get_vbox()->pack_start (*table);
+		dialog.get_vbox()->set_spacing (4);
+
+		/* copy to a slot on this track ? */
+		Gtk::CheckButton *to_slot = NULL;
+		if (!with_processing) {
+			to_slot = manage (new Gtk::CheckButton (_("Bounce to Trigger Slot:")));
+			Gtk::Alignment *slot_align = manage (new Gtk::Alignment (0, .5, 0, 0));
+			slot_align->add (*to_slot);
+
+			ArdourWidgets::ArdourDropdown *tslot = manage (new ArdourWidgets::ArdourDropdown ());
+
+			for (int c = 0; c < default_triggers_per_box; ++c) {
+				std::string lbl = cue_marker_name (c);
+				tslot->AddMenuElem (Menu_Helpers::MenuElem (lbl, sigc::bind ([] (uint32_t* t, uint32_t v, ArdourWidgets::ArdourDropdown* s, std::string l) {*t = v; s->set_text (l);}, &trigger_slot, c, tslot, lbl)));
+			}
+			tslot->set_active ("A");
+
+			HBox *tbox = manage (new HBox());
+			tbox->pack_start(*slot_align, false, false);
+			tbox->pack_start(*tslot, false, false);
+			table->attach (*tbox,       0, 2, 0,1, Gtk::FILL, Gtk::SHRINK);
+		}
+
+		/* copy to the user's Clip Library ? */
+		Gtk::CheckButton *cliplib = manage (new Gtk::CheckButton (_("Bounce to Clip Library")));
+		Gtk::Alignment *align = manage (new Gtk::Alignment (0, .5, 0, 0));
+		align->add (*cliplib);
+		align->show_all ();
+		table->attach (*align,      0, 2, 1,2, Gtk::FILL, Gtk::SHRINK);
+
+		/* in all cases, the selected Range will appear in the Source list */
+		Label* s_label = manage (new Label (_("Bounced Region will appear in the Source list")));
+		table->attach (*s_label,      0, 2, 2,3, Gtk::FILL, Gtk::SHRINK);
+
+		dialog.get_vbox()->show_all ();
 
 		dialog.show ();
 
@@ -307,6 +351,38 @@ Editor::bounce_region_selection (bool with_processing)
 			return;
 		}
 		dialog.get_result(bounce_name);
+
+		if (to_slot && to_slot->get_active()) {
+			copy_to_trigger = true;
+		}
+		if (cliplib->get_active ()) {
+			copy_to_clip_library = true;
+		}
+	}
+
+	/* prevent user from accidentally overwriting a slot that they can't see */
+	bool overwriting = false;
+	if (copy_to_trigger) {
+		for (RegionSelection::iterator i = selection->regions.begin(); i != selection->regions.end(); ++i) {
+
+			boost::shared_ptr<Region> region ((*i)->region());
+			RouteTimeAxisView* rtv = dynamic_cast<RouteTimeAxisView*>(&(*i)->get_time_axis_view());
+			boost::shared_ptr<Track> track = boost::dynamic_pointer_cast<Track> (rtv->route());
+			if (!track) {
+				continue;
+			}
+			if (track->triggerbox()->trigger(trigger_slot)->region()) {
+				overwriting = true;
+			}
+		}
+		if (overwriting) {
+			ArdourMessageDialog msg (string_compose(_("Are you sure you want to overwrite the contents in slot %1?"),cue_marker_name(trigger_slot)), false, MESSAGE_QUESTION, BUTTONS_YES_NO, true);
+			msg.set_title (_("Overwriting slot"));
+			msg.set_secondary_text (_("One of your selected tracks has content in this slot."));
+			if (msg.run () != RESPONSE_YES) {
+				return;
+			}
+		}
 	}
 
 	for (RegionSelection::iterator i = selection->regions.begin(); i != selection->regions.end(); ++i) {
@@ -320,10 +396,24 @@ Editor::bounce_region_selection (bool with_processing)
 		boost::shared_ptr<Region> r;
 
 		if (with_processing) {
-			r = track->bounce_range (region->position(), region->position() + region->length(), itt, track->main_outs(), false, bounce_name);
+			r = track->bounce_range (region->position_sample(), region->position_sample() + region->length_samples(), itt, track->main_outs(), false, bounce_name);
 		} else {
-			r = track->bounce_range (region->position(), region->position() + region->length(), itt, boost::shared_ptr<Processor>(), false, bounce_name);
+			r = track->bounce_range (region->position_sample(), region->position_sample() + region->length_samples(), itt, boost::shared_ptr<Processor>(), false, bounce_name);
 		}
+
+		if (copy_to_clip_library) {
+			export_to_clip_library (r);
+		}
+
+		if (copy_to_trigger) {
+			boost::shared_ptr<Trigger::UIState> state (new Trigger::UIState());
+			state->name = bounce_name;
+			//ToDo: can/should we get the tempo for this region?
+			track->triggerbox ()->enqueue_trigger_state_for_region(r, state);
+			track->triggerbox ()->set_from_selection (trigger_slot, r);
+			track->presentation_info ().set_trigger_track (true);
+		}
+
 	}
 }
 
@@ -347,7 +437,7 @@ Editor::write_region (string path, boost::shared_ptr<AudioRegion> region)
 
 	/* don't do duplicate of the entire source if that's what is going on here */
 
-	if (region->start() == 0 && region->length() == region->source_length(0)) {
+	if (region->start().is_zero () && region->length() == region->source_length(0)) {
 		/* XXX should link(2) to create a new inode with "path" */
 		return true;
 	}
@@ -396,19 +486,20 @@ Editor::write_region (string path, boost::shared_ptr<AudioRegion> region)
 
 	}
 
-	to_read = region->length();
-	pos = region->position();
+	to_read = region->length_samples();
+	pos = region->position_sample();
 
 	while (to_read) {
 		samplepos_t this_time;
 
 		this_time = min (to_read, chunk_size);
 
-		for (vector<boost::shared_ptr<AudioFileSource> >::iterator src=sources.begin(); src != sources.end(); ++src) {
+		uint32_t chn = 0;
+		for (vector<boost::shared_ptr<AudioFileSource> >::iterator src=sources.begin(); src != sources.end(); ++src, ++chn) {
 
 			fs = (*src);
 
-			if (region->read_at (buf, buf, gain_buffer, pos, this_time) != this_time) {
+			if (region->read_at (buf, buf, gain_buffer, pos, this_time, chn) != this_time) {
 				break;
 			}
 
@@ -475,11 +566,11 @@ Editor::write_audio_selection (TimeSelection& ts)
 }
 
 bool
-Editor::write_audio_range (AudioPlaylist& playlist, const ChanCount& count, list<AudioRange>& range)
+Editor::write_audio_range (AudioPlaylist& playlist, const ChanCount& count, list<TimelineRange>& range)
 {
 	boost::shared_ptr<AudioFileSource> fs;
 	const samplepos_t chunk_size = 4096;
-	samplepos_t nframes;
+	samplecnt_t nframes;
 	Sample buf[chunk_size];
 	gain_t gain_buffer[chunk_size];
 	samplepos_t pos;
@@ -529,56 +620,55 @@ Editor::write_audio_range (AudioPlaylist& playlist, const ChanCount& count, list
 	}
 
 
-	for (list<AudioRange>::iterator i = range.begin(); i != range.end();) {
+	for (list<TimelineRange>::iterator i = range.begin(); i != range.end();) {
 
-		nframes = (*i).length();
-		pos = (*i).start;
+		nframes = (*i).length().samples();
+		pos = (*i).start().samples();
 
 		while (nframes) {
-			samplepos_t this_time;
 
-			this_time = min (nframes, chunk_size);
+			timecnt_t this_time = timecnt_t (min (nframes, chunk_size));
 
 			for (uint32_t n=0; n < channels; ++n) {
 
 				fs = sources[n];
 
-				if (playlist.read (buf, buf, gain_buffer, pos, this_time, n) != this_time) {
+				if (playlist.read (buf, buf, gain_buffer, timepos_t (pos), this_time, n) != this_time) {
 					break;
 				}
 
-				if (fs->write (buf, this_time) != this_time) {
+				if (fs->write (buf, this_time.samples()) != this_time.samples()) {
 					goto error_out;
 				}
 			}
 
-			nframes -= this_time;
-			pos += this_time;
+			nframes -= this_time.samples();
+			pos += this_time.samples();
 		}
 
-		list<AudioRange>::iterator tmp = i;
+		list<TimelineRange>::iterator tmp = i;
 		++tmp;
 
 		if (tmp != range.end()) {
 
 			/* fill gaps with silence */
 
-			nframes = (*tmp).start - (*i).end;
+			nframes = (*i).end().distance ((*tmp).start()).samples();
 
 			while (nframes) {
 
-				samplepos_t this_time = min (nframes, chunk_size);
-				memset (buf, 0, sizeof (Sample) * this_time);
+				timecnt_t this_time = timecnt_t (min (nframes, chunk_size));
+				memset (buf, 0, sizeof (Sample) * this_time.samples());
 
 				for (uint32_t n=0; n < channels; ++n) {
 
 					fs = sources[n];
-					if (fs->write (buf, this_time) != this_time) {
+					if (fs->write (buf, this_time.samples()) != this_time.samples()) {
 						goto error_out;
 					}
 				}
 
-				nframes -= this_time;
+				nframes -= this_time.samples();
 			}
 		}
 

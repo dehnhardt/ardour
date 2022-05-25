@@ -20,6 +20,8 @@
  */
 
 #include <gtkmm.h>
+#include "ardour/auditioner.h"
+#include "ardour/session.h"
 #include "ardour/vst_plugin.h"
 #include "ardour/vst_types.h"
 #include "ardour/plugin_insert.h"
@@ -33,13 +35,14 @@
 #include <gdk/gdkx.h>
 #endif
 
-VSTPluginUI::VSTPluginUI (boost::shared_ptr<ARDOUR::PluginInsert> insert, boost::shared_ptr<ARDOUR::VSTPlugin> plugin)
-	: PlugUIBase (insert)
+VSTPluginUI::VSTPluginUI (boost::shared_ptr<ARDOUR::PlugInsertBase> pib, boost::shared_ptr<ARDOUR::VSTPlugin> plugin)
+	: PlugUIBase (pib)
 	, _vst (plugin)
 {
 	Gtk::HBox* box = manage (new Gtk::HBox);
 	box->set_spacing (6);
 	box->set_border_width (6);
+
 	add_common_widgets (box);
 
 	pack_start (*box, false, false);

@@ -61,7 +61,7 @@ Maschine2Knob::Maschine2Knob (PBD::EventLoop* el, Item* parent)
 	text->set_font_description (fd);
 	text->set_position (Duple (-_radius, _radius + 2));
 	text->set_color (0xffffffff);
-	_bounding_box_dirty = true;
+	set_bbox_dirty ();
 }
 
 Maschine2Knob::~Maschine2Knob ()
@@ -149,16 +149,16 @@ Maschine2Knob::compute_bounding_box () const
 {
 	if (!_canvas || _radius == 0) {
 		_bounding_box = Rect ();
-		_bounding_box_dirty = false;
+		set_bbox_clean ();
 		return;
 	}
 
-	if (_bounding_box_dirty) {
+	if (bbox_dirty()) {
 		_bounding_box = Rect (- _radius, - _radius, _radius, _radius);
-		_bounding_box_dirty = false;
+		set_bbox_clean ();
 	}
 
-	add_child_bounding_boxes ();
+	/* Item::bounding_box() will add children */
 }
 
 void

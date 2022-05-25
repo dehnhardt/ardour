@@ -371,14 +371,25 @@ ExportHandler::finish_timespan ()
 {
 	graph_builder->get_analysis_results (export_status->result_map);
 
+	/* work-around: split-channel will produce several files
+	 * for a single config, config_map iterator below does not yet
+	 * take that into account.
+	 */
+	for (auto const& f : graph_builder->exported_files ()) {
+		Session::Exported (current_timespan->name(), f, config_map.begin()->second.format->reimport(), current_timespan->get_start ()); /* EMIT SIGNAL */
+	}
+
 	while (config_map.begin() != timespan_bounds.second) {
 
 		// XXX single timespan+format may produce multiple files
 		// e.g export selection == session
 		// -> TagLib::FileRef is null
 
-		ExportFormatSpecPtr fmt = config_map.begin()->second.format;
-		std::string filename = config_map.begin()->second.filename->get_path(fmt);
+		FileSpec& config = config_map.begin()->second;
+		ExportFormatSpecPtr fmt = config.format;
+		config.filename->set_channel_config (config.channel_config);
+		std::string filename = config.filename->get_path (fmt);
+
 		if (fmt->with_cue()) {
 			export_cd_marker_file (current_timespan, fmt, filename, CDMarkerCUE);
 		}
@@ -390,8 +401,6 @@ ExportHandler::finish_timespan ()
 		if (fmt->with_mp4chaps()) {
 			export_cd_marker_file (current_timespan, fmt, filename, MP4Chaps);
 		}
-
-		Session::Exported (current_timespan->name(), filename); /* EMIT SIGNAL */
 
 		/* close file first, otherwise TagLib enounters an ERROR_SHARING_VIOLATION
 		 * The process cannot access the file because it is being used.
@@ -454,7 +463,7 @@ ExportHandler::finish_timespan ()
 			subs.insert (std::pair<char, std::string> ('Y', year.str ()));
 			subs.insert (std::pair<char, std::string> ('Z', metadata.country ()));
 
-			ARDOUR::SystemExec *se = new ARDOUR::SystemExec(fmt->command(), subs);
+			ARDOUR::SystemExec *se = new ARDOUR::SystemExec(fmt->command(), subs, true);
 			info << "Post-export command line : {" << se->to_s () << "}" << endmsg;
 			se->ReadStdout.connect_same_thread(command_connection, boost::bind(&ExportHandler::command_output, this, _1, _2));
 			int ret = se->start (SystemExec::MergeWithStdin);
@@ -598,7 +607,7 @@ ExportHandler::export_cd_marker_file (ExportTimespanPtr timespan, ExportFormatSp
 				if ((*i)->is_mark()) {
 					/* Index within track */
 
-					status.index_position = (*i)->start() - timespan->get_start();
+					status.index_position = (*i)->start_sample() - timespan->get_start();
 					(this->*index_func) (status);
 				}
 
@@ -608,7 +617,7 @@ ExportHandler::export_cd_marker_file (ExportTimespanPtr timespan, ExportFormatSp
 			/* A track, defined by a cd range marker or a cd location marker outside of a cd range */
 
 			status.track_position = last_end_time - timespan->get_start();
-			status.track_start_sample = (*i)->start() - timespan->get_start();  // everything before this is the pregap
+			status.track_start_sample = (*i)->start_sample() - timespan->get_start();  // everything before this is the pregap
 			status.track_duration = 0;
 
 			if ((*i)->is_mark()) {
@@ -617,9 +626,9 @@ ExportHandler::export_cd_marker_file (ExportTimespanPtr timespan, ExportFormatSp
 				++nexti;
 
 				if (nexti != temp.end()) {
-					status.track_duration = (*nexti)->start() - last_end_time;
+					status.track_duration = (*nexti)->start_sample() - last_end_time;
 
-					last_end_time = (*nexti)->start();
+					last_end_time = (*nexti)->start_sample();
 				} else {
 					// this was the last marker, use timespan end
 					status.track_duration = timespan->get_end() - last_end_time;
@@ -628,9 +637,9 @@ ExportHandler::export_cd_marker_file (ExportTimespanPtr timespan, ExportFormatSp
 				}
 			} else {
 				// range
-				status.track_duration = (*i)->end() - last_end_time;
+				status.track_duration = (*i)->end_sample() - last_end_time;
 
-				last_end_time = (*i)->end();
+				last_end_time = (*i)->end_sample();
 			}
 
 			(this->*track_func) (status);

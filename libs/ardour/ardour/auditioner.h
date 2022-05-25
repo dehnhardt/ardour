@@ -27,6 +27,8 @@
 
 #include <glibmm/threads.h>
 
+#include "evoral/PatchChange.h"
+
 #include "ardour/ardour.h"
 #include "ardour/plugin.h"
 #include "ardour/track.h"
@@ -48,7 +50,7 @@ public:
 	int connect ();
 
 	bool auditioning() const;
-	void audition_region (boost::shared_ptr<Region>);
+	void audition_region (boost::shared_ptr<Region>, bool loop = false);
 	int play_audition (samplecnt_t nframes);
 	void cancel_audition ();
 
@@ -56,6 +58,12 @@ public:
 	void seek_to_percent (float const pos);
 	sampleoffset_t seek_sample() const { return _seeking ? _seek_sample : -1;}
 	void seek_response(sampleoffset_t pos);
+
+	void idle_synth_update ();
+
+	Evoral::PatchChange<MidiBuffer::TimeType> const& patch_change (uint8_t chn) {
+		return _patch_change[chn & 0xf];
+	}
 
 	MonitorState monitoring_state () const;
 
@@ -79,6 +87,9 @@ public:
 	void freeze_me (InterThreadInfo&) {}
 	void unfreeze () {}
 
+	/* MIDI Track -- listen to Bank/Patch */
+	void update_controls (BufferSet const& bufs);
+
 	boost::shared_ptr<Region> bounce (InterThreadInfo&, std::string const& name) {
 		return boost::shared_ptr<Region> ();
 	}
@@ -87,9 +98,10 @@ public:
 		return boost::shared_ptr<Region> ();
 	}
 
-	int export_stuff (BufferSet&, samplepos_t, samplecnt_t, boost::shared_ptr<Processor>, bool, bool, bool, MidiStateTracker&) { return -1; }
+	int export_stuff (BufferSet&, samplepos_t, samplecnt_t, boost::shared_ptr<Processor>, bool, bool, bool, MidiNoteTracker&) { return -1; }
 
-	void set_audition_synth_info(PluginInfoPtr in) { audition_synth_info = in; }
+	void set_audition_synth_info(PluginInfoPtr in);
+	PluginInfoPtr get_audition_synth_info() {return audition_synth_info;}
 
 	samplecnt_t output_latency () const { return 0; }
 
@@ -102,25 +114,29 @@ private:
 	samplepos_t current_sample;
 	mutable GATOMIC_QUAL gint _auditioning;
 	Glib::Threads::Mutex lock;
-	samplecnt_t length;
+	timecnt_t length;
 	sampleoffset_t _seek_sample;
+	bool _reload_synth;
 	bool _seeking;
 	bool _seek_complete;
 	bool via_monitor;
 	bool _midi_audition;
 	bool _queue_panic;
+	bool _loop;
 
 	boost::shared_ptr<Processor> asynth;
+
+	Evoral::PatchChange<MidiBuffer::TimeType> _patch_change[16];
 
 	PluginInfoPtr lookup_fallback_synth_plugin_info (std::string const&) const;
 	void drop_ports ();
 	void lookup_fallback_synth ();
-	void load_synth(bool);
+	bool load_synth();
 	void unload_synth (bool);
 	static void*_drop_ports (void*);
 	void actually_drop_ports ();
 	void output_changed (IOChange, void*);
-	sampleoffset_t _import_position;
+	timepos_t _import_position;
 };
 
 }; /* namespace ARDOUR */

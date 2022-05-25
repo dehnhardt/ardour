@@ -110,7 +110,7 @@ ArdourKeyboard::setup_keybindings ()
 
 	string lowercase_program_name = downcase (string(PROGRAM_NAME));
 
-	/* extract and append minor vesion */
+	/* extract and append minor version */
 	std::string rev (revision);
 	std::size_t pos = rev.find_first_of("-");
 	if (pos != string::npos && pos > 0) {
@@ -229,7 +229,7 @@ ArdourKeyboard::setup_keybindings ()
 }
 
 XMLNode&
-ArdourKeyboard::get_state (void)
+ArdourKeyboard::get_state () const
 {
 	XMLNode* node = &Keyboard::get_state ();
 

@@ -70,7 +70,7 @@ class LIBARDOUR_API TransportMasterManager : public boost::noncopyable
 	PBD::Signal2<void,boost::shared_ptr<TransportMaster>, boost::shared_ptr<TransportMaster> > CurrentChanged;
 
 	int set_state (XMLNode const &, int);
-	XMLNode& get_state();
+	XMLNode& get_state() const;
 
 	void set_session (Session*);
 	Session* session() const { return _session; }
@@ -84,8 +84,6 @@ class LIBARDOUR_API TransportMasterManager : public boost::noncopyable
 	TransportMasters const & transport_masters() const { return _transport_masters; }
 
 	static const std::string state_node_name;
-
-	void reconnect_ports ();
 
 	void block_disk_output ();
 	void unblock_disk_output ();

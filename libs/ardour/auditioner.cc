@@ -53,6 +53,7 @@ Auditioner::Auditioner (Session& s)
 	, current_sample (0)
 	, length (0)
 	, _seek_sample (-1)
+	, _reload_synth (false)
 	, _seeking (false)
 	, _seek_complete (false)
 	, via_monitor (false)
@@ -78,7 +79,7 @@ Auditioner::init ()
 
 	if (!audition_synth_info) {
 		lookup_fallback_synth ();
-	} 
+	}
 
 	_output->changed.connect_same_thread (*this, boost::bind (&Auditioner::output_changed, this, _1, _2));
 
@@ -107,7 +108,7 @@ Auditioner::lookup_fallback_synth_plugin_info (std::string const& uri) const
 void
 Auditioner::lookup_fallback_synth ()
 {
-	
+
 	PluginInfoPtr nfo = lookup_fallback_synth_plugin_info ("http://gareus.org/oss/lv2/gmsynth");
 
 	//GMsynth not found: fallback to Reasonable Synth
@@ -126,23 +127,48 @@ Auditioner::lookup_fallback_synth ()
 	set_audition_synth_info(nfo);
 }
 
-void
-Auditioner::load_synth (bool need_lock)
+bool
+Auditioner::load_synth ()
 {
-	unload_synth(need_lock);
-
 	if (!audition_synth_info) {
 		lookup_fallback_synth ();
 	}
 
 	if (!audition_synth_info) {
-		return;
+		unload_synth (true);
+		return false;
 	}
-	
+
+	if (asynth && !_reload_synth) {
+		asynth->deactivate ();
+		asynth->activate ();
+		_queue_panic = true;
+		return true;
+	}
+
+	unload_synth (true);
+
 	boost::shared_ptr<Plugin> p = audition_synth_info->load (_session);
 	if (p) {
-		asynth = boost::shared_ptr<Processor> (new PluginInsert (_session, p));
+		asynth = boost::shared_ptr<Processor> (new PluginInsert (_session, time_domain(), p));
 	}
+
+	if (asynth) {
+		ProcessorStreams ps;
+		asynth->set_owner (this);
+		if (add_processor (asynth, PreFader, &ps, true)) {
+			error << _("Failed to load synth for MIDI-Audition.") << endmsg;
+		}
+
+		Glib::Threads::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
+		if (configure_processors (&ps)) {
+			error << _("Cannot setup auditioner processing flow.") << endmsg;
+			unload_synth (true);
+			return false;
+		}
+		_reload_synth = false;
+	}
+	return true;
 }
 
 void
@@ -271,6 +297,10 @@ Auditioner::roll (pframes_t nframes, samplepos_t start_sample, samplepos_t end_s
 
 	process_output_buffers (bufs, start_sample, end_sample, nframes, !_session.transport_stopped(), true);
 
+	if (_midi_audition) {
+		update_controls (bufs);
+	}
+
 	/* note: auditioner never writes to disk, so we don't care about the
 	 * disk writer status (it's buffers will always have no data in them).
 	 */
@@ -290,7 +320,47 @@ Auditioner::roll (pframes_t nframes, samplepos_t start_sample, samplepos_t end_s
 }
 
 void
-Auditioner::audition_region (boost::shared_ptr<Region> region)
+Auditioner::update_controls (BufferSet const& bufs)
+{
+	const MidiBuffer& buf = bufs.get_midi(0);
+	for (MidiBuffer::const_iterator e = buf.begin(); e != buf.end(); ++e) {
+		const Evoral::Event<samplepos_t>& ev = *e;
+		const uint8_t* buf = ev.buffer();
+		const uint8_t channel = buf[0] & 0x0F;
+		const int bank = _patch_change[channel].is_set () ? _patch_change[channel].bank () : 0;
+		switch (midi_parameter_type (buf[0])) {
+			case MidiPgmChangeAutomation:
+				if (!_patch_change[channel].is_set ()) {
+					_patch_change[channel] = Evoral::PatchChange<MidiBuffer::TimeType> (0, channel, 0, 0);
+				}
+				_patch_change[channel].set_program (ev.pgm_number ());
+				break;
+			case MidiCCAutomation:
+				switch (ev.cc_number ()) {
+					case MIDI_CTL_MSB_BANK:
+						if (!_patch_change[channel].is_set ()) {
+							_patch_change[channel] = Evoral::PatchChange<MidiBuffer::TimeType> (0, channel, 0, 0);
+						}
+						_patch_change[channel].set_bank ((bank & 0x007f) | (ev.cc_value () << 7));
+						break;
+					case MIDI_CTL_LSB_BANK:
+						if (!_patch_change[channel].is_set ()) {
+							_patch_change[channel] = Evoral::PatchChange<MidiBuffer::TimeType> (0, channel, 0, 0);
+						}
+						_patch_change[channel].set_bank ((bank & 0x3f80) | ev.cc_value ());
+						break;
+					default:
+						break;
+				}
+				break;
+			default:
+				break;
+		}
+	}
+}
+
+void
+Auditioner::audition_region (boost::shared_ptr<Region> region, bool loop)
 {
 	if (g_atomic_int_get (&_auditioning)) {
 		/* don't go via session for this, because we are going
@@ -298,6 +368,8 @@ Auditioner::audition_region (boost::shared_ptr<Region> region)
 		*/
 		cancel_audition ();
 	}
+
+	_loop = loop;
 
 	Glib::Threads::Mutex::Lock lm (lock);
 
@@ -308,24 +380,25 @@ Auditioner::audition_region (boost::shared_ptr<Region> region)
 		unload_synth (true);
 
 		midi_region.reset();
-		_import_position = 0;
+		_import_position = timepos_t (Temporal::AudioTime);
 
 		/* copy it */
+
 		the_region = boost::dynamic_pointer_cast<AudioRegion> (RegionFactory::create (region, false));
-		the_region->set_position (0);
+		the_region->set_position (timepos_t (Temporal::AudioTime));
 
 		_disk_reader->midi_playlist()->drop_regions ();
 
 		_disk_reader->audio_playlist()->drop_regions ();
-		_disk_reader->audio_playlist()->add_region (the_region, 0, 1);
+		_disk_reader->audio_playlist()->add_region (the_region, timepos_t (Temporal::AudioTime), 1);
 
-		ProcessorStreams ps;
 		{
+			ProcessorStreams ps;
 			Glib::Threads::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
 
 			if (configure_processors (&ps)) {
 				error << string_compose (_("Cannot setup auditioner processing flow for %1 channels"),
-				                         region->n_channels()) << endmsg;
+				                         region->sources().size()) << endmsg;
 				return;
 			}
 		}
@@ -340,32 +413,22 @@ Auditioner::audition_region (boost::shared_ptr<Region> region)
 		midi_region = (boost::dynamic_pointer_cast<MidiRegion> (RegionFactory::create (region, false)));
 		midi_region->set_position (_import_position);
 
+		/* avoid truncated notes: round up the length of midi regions to seconds, at least 2 seconds long */
+		/* TODO:  maybe round up to the nearest bar like it's done in import.cc write_midi_data_to_new_files */
+		samplecnt_t smpl = midi_region->length_samples();
+		double seconds = smpl/_session.sample_rate();
+		seconds = max (2.0, ceil(seconds));
+		timecnt_t new_len( seconds * _session.sample_rate() );
+		midi_region->set_length(new_len);
+
 		_disk_reader->audio_playlist()->drop_regions();
 
 		_disk_reader->midi_playlist()->drop_regions ();
 		_disk_reader->midi_playlist()->add_region (midi_region, _import_position, 1);
 		_disk_reader->reset_tracker();
 
-		ProcessorStreams ps;
-
-		load_synth (true);
-
-		if (asynth) {
-			int rv = add_processor (asynth, PreFader, &ps, true);
-			if (rv) {
-				error << _("Failed to load synth for MIDI-Audition.") << endmsg;
-			}
-		}
-
-		{
-			Glib::Threads::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
-
-			if (configure_processors (&ps)) {
-				error << string_compose (_("Cannot setup auditioner processing flow for %1 channels"),
-							 region->n_channels()) << endmsg;
-				unload_synth (true);
-				return;
-			}
+		if (!load_synth ()) {
+			return;
 		}
 
 	} else {
@@ -380,7 +443,7 @@ Auditioner::audition_region (boost::shared_ptr<Region> region)
 	_seeking = false;
 
 	int dir;
-	samplecnt_t offset;
+	timepos_t offset;
 
 	if (_midi_audition) {
 		length = midi_region->length();
@@ -399,10 +462,10 @@ Auditioner::audition_region (boost::shared_ptr<Region> region)
 	/* can't audition from a negative sync point */
 
 	if (dir < 0) {
-		offset = 0;
+		offset = timecnt_t (Temporal::AudioTime);
 	}
 
-	_disk_reader->seek (offset, true);
+	_disk_reader->seek (offset.samples(), true);
 
 	if (_midi_audition) {
 		/* Fill MIDI buffers.
@@ -415,9 +478,19 @@ Auditioner::audition_region (boost::shared_ptr<Region> region)
 		_disk_reader->overwrite_existing_buffers ();
 	}
 
-	current_sample = offset;
+	current_sample = offset.samples();
 
 	g_atomic_int_set (&_auditioning, 1);
+}
+
+void
+Auditioner::set_audition_synth_info(PluginInfoPtr in)
+{
+	if (audition_synth_info == in) {
+		return;
+	}
+	audition_synth_info = in;
+	_reload_synth = true;
 }
 
 int
@@ -429,7 +502,9 @@ Auditioner::play_audition (samplecnt_t nframes)
 
 	if (g_atomic_int_get (&_auditioning) == 0) {
 		silence (nframes);
-		unload_synth (false);
+		if (_reload_synth) {
+			unload_synth (false);
+		}
 		return 0;
 	}
 
@@ -455,7 +530,7 @@ Auditioner::play_audition (samplecnt_t nframes)
 
 	if(!_seeking) {
 		/* process audio */
-		this_nframes = min (nframes, length - current_sample + _import_position);
+		this_nframes = min (nframes, length.samples() - current_sample + _import_position.samples());
 
 		if (this_nframes > 0 && 0 != (ret = roll (this_nframes, current_sample, current_sample + this_nframes, need_butler))) {
 			silence (nframes);
@@ -475,7 +550,7 @@ Auditioner::play_audition (samplecnt_t nframes)
 		silence (nframes);
 	}
 
-	if (_seek_sample >= 0 && _seek_sample < length && !_seeking) {
+	if (_seek_sample >= 0 && _seek_sample < length.samples() && !_seeking) {
 		_queue_panic = true;
 		_seek_complete = false;
 		_seeking = true;
@@ -483,12 +558,18 @@ Auditioner::play_audition (samplecnt_t nframes)
 	}
 
 	if (!_seeking) {
-		AuditionProgress(current_sample - _import_position, length); /* emit */
+		AuditionProgress(current_sample - _import_position.samples(), length.samples()); /* emit */
 	}
 
-	if (current_sample >= length + _import_position) {
+	if (current_sample >= (length + _import_position).samples()) {
+		if (_loop) {
+			_seek_sample = 0;
+			return 1;
+		}
 		_session.cancel_audition ();
-		unload_synth (false);
+		if (_reload_synth) {
+			unload_synth (false);
+		}
 		return 0;
 	} else {
 		return need_butler ? 1 : 0;
@@ -515,7 +596,7 @@ Auditioner::seek_to_sample (sampleoffset_t pos) {
 void
 Auditioner::seek_to_percent (float const pos) {
 	if (_seek_sample < 0 && !_seeking) {
-		_seek_sample = floorf(length * pos / 100.0);
+		_seek_sample = floorf(length.samples() * pos / 100.0);
 	}
 }
 
@@ -529,6 +610,23 @@ Auditioner::seek_response (sampleoffset_t pos) {
 	}
 }
 
+void
+Auditioner::idle_synth_update ()
+{
+	if (auditioning() || !asynth) {
+		return;
+	}
+	auto pi = boost::dynamic_pointer_cast<PluginInsert> (asynth);
+
+	/* Note: calling thread must have process buffers */
+	BufferSet   bufs;
+	samplepos_t start     = 0;
+	pframes_t   n_samples = 16;
+	/* MIDI buffers need to be able to hold patch/pgm change messages. (16 bytes + msg-size) per event */
+	bufs.ensure_buffers (max (asynth->input_streams (), asynth->output_streams ()), std::max<size_t> (1024, n_samples));
+	pi->run (bufs, start, start + n_samples, 1.0, n_samples, false);
+	update_controls (bufs);
+}
 
 void
 Auditioner::output_changed (IOChange change, void* /*src*/)
@@ -607,4 +705,3 @@ Auditioner::monitoring_state () const
 {
 	return MonitoringDisk;
 }
-

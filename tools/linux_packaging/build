@@ -3,7 +3,7 @@
 # script for pulling together a Linux app bundle.
 #
 # This will create a bundle for a single architecture.
-# Execute this scirpt on both x86 and x86_64 and then use
+# Execute this script on both x86 and x86_64 and then use
 # package to merge the 2 bundles into a final package with the
 # installer. See "noderun" for a complete build script.
 
@@ -195,6 +195,7 @@ Locale=$Shared/locale
 MidiMaps=$Shared/midi_maps
 PatchFiles=$Shared/patchfiles
 LuaScripts=$Shared/scripts
+MediaClips=$Shared/media
 WebSurfaces=$Shared/web_surfaces
 MackieControl=$Shared/mcp
 OSC=$Shared/osc
@@ -375,9 +376,13 @@ for x in $BUILD_ROOT/../share/scripts/*.lua ; do
     cp "$x" $LuaScripts
 done
 
-# recusively copy web-surface html/js
+# recursively copy web-surface html/js
 cp -a $BUILD_ROOT/../share/web_surfaces $WebSurfaces
 rm $WebSurfaces/wscript
+
+# recursively copy clips/media
+cp -a $BUILD_ROOT/../share/media $MediaClips
+rm $MediaClips/wscript
 
 # MackieControl data
 # got to be careful with names here
@@ -542,7 +547,7 @@ while [ true ] ; do
 		for dep in $deps ; do
 			if test "not" = ${dep}; then
 				echo ""
-				echo "!!! ERROR !!! - Missing dependant library for $file."
+				echo "!!! ERROR !!! - Missing dependent library for $file."
 				echo "Searched: " $OURLIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 				echo ""
 				(LD_LIBRARY_PATH=$OURLIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} ldd $file)
@@ -557,7 +562,7 @@ while [ true ] ; do
 			if echo $dep | grep -qs "^/lib/" ; then continue; fi
 			if echo $dep | grep -qs "^/usr/lib/" ; then continue; fi
 			if echo $dep | grep -qs "^/usr/local/lib/" ; then continue; fi
-			## the following re likley redudant ##
+			## the following are likely redundant ##
 			# skip jack, ALSA & pulse
 			if echo $dep | grep -qs libjack ; then continue; fi
 			if echo $dep | grep -qs libasound ; then continue; fi
@@ -580,10 +585,10 @@ while [ true ] ; do
 			if ! test -f $Libraries/$base; then
 				parent=$(basename ${file})
 				if echo $dep | grep -sq '^libs' ; then
-					echo "Copying dependant lib $BUILD_ROOT/$dep    (required by ${parent})"
+					echo "Copying dependent lib $BUILD_ROOT/$dep    (required by ${parent})"
 					cp $BUILD_ROOT/$dep $Libraries
 				else
-					echo "Copying dependant lib $dep    (required by ${parent})"
+					echo "Copying dependent lib $dep    (required by ${parent})"
 					cp $dep $Libraries
 				fi
 				chmod 755 $Libraries/`basename $dep`
@@ -724,7 +729,23 @@ if test -n "$MIXBUS"; then
 	cp "${CACHEDIR}/harrison_vamp.${VAMPARCH}.so" \
 		$APPLIB/harrison_vamp.so
 	chmod +x $APPLIB/harrison_vamp.so
+
+	# Mixbus Bundled Media Content
+	curl -s -S --fail -#  \
+		-z "${CACHEDIR}/MixbusBundledMedia.zip" \
+		-o "${CACHEDIR}/MixbusBundledMedia.zip" \
+		"http://rsrc.harrisonconsoles.com/mixbus/mb8/content/MixbusBundledMedia.zip"
+
+	if test -f "${CACHEDIR}/MixbusBundledMedia.zip"; then
+		echo "Adding Mixbus Bundled Content"
+		rm -f "${MediaClips}/"*.*
+		unzip -q -d "${MediaClips}" "${CACHEDIR}/MixbusBundledMedia.zip"
+	fi
 fi
+
+echo "Setting Bundled Media dir/file permissions"
+find "${MediaClips}" -type d -exec chmod 755 "{}" \;
+find "${MediaClips}" -type f -exec chmod 644 "{}" \;
 
 if true ; then
 	mkdir -p $APPLIB/LV2
@@ -760,7 +781,7 @@ if test x$WITH_GRATIS_X42_LV2 != x ; then
 
 	echo "Adding gratis x42 Plugins"
 
-	for proj in x42-midifilter x42-stereoroute setBfree x42-avldrums x42-limiter x42-tuner; do
+	for proj in x42-autotune x42-midifilter x42-stereoroute setBfree x42-avldrums x42-limiter x42-tuner; do
 		X42_VERSION=$(curl -s -S http://x42-plugins.com/x42/linux/${proj}.latest.txt)
 		rsync -a -q --partial \
 			rsync://x42-plugins.com/x42/linux/${proj}-lv2-linux-${WARCH}-${X42_VERSION}.zip \

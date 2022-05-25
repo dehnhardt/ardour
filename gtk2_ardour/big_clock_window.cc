@@ -39,7 +39,7 @@ BigClockWindow::BigClockWindow (AudioClock& c)
 	: ArdourWindow (_("Big Clock"))
 	, clock (c)
 {
-	ARDOUR_UI::Clock.connect (sigc::bind (sigc::mem_fun (clock, &AudioClock::set), false, 0));
+	ARDOUR_UI::Clock.connect (sigc::bind (sigc::mem_fun (clock, &AudioClock::set), false, Temporal::timecnt_t()));
 
 	clock.set_corner_radius (0.0);
 
@@ -48,7 +48,7 @@ BigClockWindow::BigClockWindow (AudioClock& c)
 	add (clock);
 	clock.show_all ();
 
-	clock.size_request (default_size);
+	default_size = clock.size_request ();
 
 	clock.signal_size_allocate().connect (sigc::mem_fun (*this, &BigClockWindow::clock_size_reallocated));
 }

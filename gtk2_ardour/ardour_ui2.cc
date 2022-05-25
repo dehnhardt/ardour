@@ -65,6 +65,7 @@
 #include "main_clock.h"
 #include "mixer_ui.h"
 #include "recorder_ui.h"
+#include "trigger_page.h"
 #include "utils.h"
 #include "time_info_box.h"
 #include "midi_tracer.h"
@@ -90,6 +91,7 @@ ARDOUR_UI::setup_tooltips ()
 	ArdourCanvas::Canvas::set_tooltip_timeout (Gtk::Settings::get_default()->property_gtk_tooltip_timeout ());
 
 	set_tip (auto_return_button, _("Return to last playback start when stopped"));
+	set_tip (layered_button, _("<b>When active</b>, new recordings will be added as regions on a layer atop existing regions.\n<b>When disabled</b>, the underlying region will be spliced and replaced with the newly recorded region."));
 	set_tip (follow_edits_button, _("Playhead follows Range tool clicks, and Range selections"));
 	parameter_changed("click-gain");
 	set_tip (solo_alert_button, _("When active, something is soloed.\nClick to de-solo everything"));
@@ -99,6 +101,8 @@ ARDOUR_UI::setup_tooltips ()
 	set_tip (secondary_clock, _("<b>Secondary Clock</b> right-click to set display mode. Click to edit, click+drag a digit or mouse-over+scroll wheel to modify.\nText edits: right-to-left overwrite <tt>Esc</tt>: cancel; <tt>Enter</tt>: confirm; postfix the edit with '+' or '-' to enter delta times.\n"));
 	set_tip (editor_meter_peak_display, _("Reset All Peak Meters"));
 	set_tip (error_alert_button, _("Show Error Log and acknowledge warnings"));
+	set_tip (_cue_rec_enable, _("<b>When enabled</b>, triggering Cues will result in Cue Markers added to the timeline"));
+	set_tip (_cue_play_enable, _("<b>When enabled</b>, Cue Markers will trigger the associated Cue when passed on the timeline"));
 
 	set_tip (latency_disable_button, _("Disable all Plugin Delay Compensation. This results in the shortest delay from live input to output, but any paths with delay-causing plugins will sound later than those without."));
 
@@ -168,6 +172,27 @@ bool drag_failed (const Glib::RefPtr<Gdk::DragContext>& context, DragResult resu
 		return true;
 	}
 	return false;
+}
+
+void
+ARDOUR_UI::cue_rec_state_clicked ()
+{
+	TriggerBox::set_cue_recording(!TriggerBox::cue_recording());
+}
+
+void
+ARDOUR_UI::cue_ffwd_state_clicked ()
+{
+	if (editor) {
+		editor->toggle_cue_behavior ();
+	}
+}
+
+void
+ARDOUR_UI::cue_rec_state_changed ()
+{
+	_cue_rec_enable.set_active_state( TriggerBox::cue_recording() ? Gtkmm2ext::ExplicitActive : Gtkmm2ext::Off);
+	//Config->get_cue_behavior()
 }
 
 void
@@ -242,6 +267,17 @@ ARDOUR_UI::repack_transport_hbox ()
 		latency_spacer.hide ();
 	}
 
+	bool show_cue = UIConfiguration::instance().get_show_toolbar_cuectrl ();
+	if (show_cue) {
+		_cue_rec_enable.show ();
+		_cue_play_enable.show ();
+		cuectrl_spacer.show ();
+	} else {
+		_cue_rec_enable.hide ();
+		_cue_play_enable.hide ();
+		cuectrl_spacer.hide ();
+	}
+
 	bool show_mnfo = UIConfiguration::instance().get_show_toolbar_monitor_info ();
 	if (show_mnfo) {
 		monitor_dim_button.show ();
@@ -306,6 +342,7 @@ ARDOUR_UI::setup_transport ()
 	mixer_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-mixer-visibility")));
 	prefs_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-preferences-visibility")));
 	recorder_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-recorder-visibility")));
+	trigger_page_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-trigger-visibility")));
 
 	act = ActionManager::get_action ("Transport", "ToggleAutoReturn");
 	auto_return_button.set_related_action (act);
@@ -331,8 +368,8 @@ ARDOUR_UI::setup_transport ()
 	set_size_request_to_display_given_text (io_latency_value, "1000 spl", 0, 0);
 
 	/* connect signals */
-	ARDOUR_UI::Clock.connect (sigc::bind (sigc::mem_fun (primary_clock, &MainClock::set), false, 0));
-	ARDOUR_UI::Clock.connect (sigc::bind (sigc::mem_fun (secondary_clock, &MainClock::set), false, 0));
+	ARDOUR_UI::Clock.connect (sigc::bind (sigc::mem_fun (primary_clock, &MainClock::set), false, timecnt_t::zero (Temporal::AudioTime)));
+	ARDOUR_UI::Clock.connect (sigc::bind (sigc::mem_fun (secondary_clock, &MainClock::set), false, timecnt_t::zero (Temporal::AudioTime)));
 
 	primary_clock->ValueChanged.connect (sigc::mem_fun(*this, &ARDOUR_UI::primary_clock_value_changed));
 	secondary_clock->ValueChanged.connect (sigc::mem_fun(*this, &ARDOUR_UI::secondary_clock_value_changed));
@@ -342,6 +379,13 @@ ARDOUR_UI::setup_transport ()
 	mixer_visibility_button.signal_drag_failed().connect (sigc::bind (sigc::ptr_fun (drag_failed), mixer));
 	prefs_visibility_button.signal_drag_failed().connect (sigc::bind (sigc::ptr_fun (drag_failed), rc_option_editor));
 	recorder_visibility_button.signal_drag_failed().connect (sigc::bind (sigc::ptr_fun (drag_failed), recorder));
+	trigger_page_visibility_button.signal_drag_failed().connect (sigc::bind (sigc::ptr_fun (drag_failed), trigger_page));
+
+	_cue_rec_enable.set_name ("record enable button");
+	_cue_rec_enable.signal_clicked.connect(sigc::mem_fun(*this, &ARDOUR_UI::cue_rec_state_clicked));
+
+	_cue_play_enable.set_name ("transport option button");
+	_cue_play_enable.signal_clicked.connect(sigc::mem_fun(*this, &ARDOUR_UI::cue_ffwd_state_clicked));
 
 	/* catch context clicks so that we can show a menu on these buttons */
 
@@ -349,6 +393,7 @@ ARDOUR_UI::setup_transport ()
 	mixer_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("mixer")), false);
 	prefs_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("preferences")), false);
 	recorder_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("recorder")), false);
+	trigger_page_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("trigger")), false);
 
 	/* setup widget style/name */
 
@@ -374,6 +419,7 @@ ARDOUR_UI::setup_transport ()
 	mixer_visibility_button.set_name (X_("page switch button"));
 	prefs_visibility_button.set_name (X_("page switch button"));
 	recorder_visibility_button.set_name (X_("page switch button"));
+	trigger_page_visibility_button.set_name (X_("page switch button"));
 
 	punch_in_button.set_name ("punch button");
 	punch_out_button.set_name ("punch button");
@@ -415,20 +461,24 @@ ARDOUR_UI::setup_transport ()
 	/* and tooltips */
 
 	Gtkmm2ext::UI::instance()->set_tip (editor_visibility_button,
-	                                    string_compose (_("Drag this tab to the desktop to show %1 in its own window\n\n"
-	                                                      "To re-attach the window, use the Window > %1 > Attach menu action"), editor->name()));
+	                                    string_compose (_("Left-Click to show the %1 window\n"
+	                                                      "Right-click to show more options"), editor->name()));
 
 	Gtkmm2ext::UI::instance()->set_tip (mixer_visibility_button,
-	                                    string_compose (_("Drag this tab to the desktop to show %1 in its own window\n\n"
-	                                                      "To re-attach the window, use the Window > %1 > Attach menu action"), mixer->name()));
+	                                    string_compose (_("Left-Click to show the %1 window\n"
+	                                                      "Right-click to show more options"), mixer->name()));
 
 	Gtkmm2ext::UI::instance()->set_tip (prefs_visibility_button,
-	                                    string_compose (_("Drag this tab to the desktop to show %1 in its own window\n\n"
-	                                                      "To re-attach the window, use the Window > %1 > Attach menu action"), rc_option_editor->name()));
+	                                    string_compose (_("Left-Click to show the %1 window\n"
+	                                                      "Right-click to show more options"), rc_option_editor->name()));
 
 	Gtkmm2ext::UI::instance()->set_tip (recorder_visibility_button,
-	                                    string_compose (_("Drag this tab to the desktop to show %1 in its own window\n\n"
-	                                                      "To re-attach the window, use the Window > %1 > Attach menu action"), recorder->name()));
+	                                    string_compose (_("Left-Click to show the %1 window\n"
+	                                                      "Right-click to show more options"), recorder->name()));
+
+	Gtkmm2ext::UI::instance()->set_tip (trigger_page_visibility_button,
+	                                    string_compose (_("Left-Click to show the %1 window\n"
+	                                                      "Right-click to show more options"), trigger_page->name()));
 
 	Gtkmm2ext::UI::instance()->set_tip (punch_in_button, _("Start recording at auto-punch start"));
 	Gtkmm2ext::UI::instance()->set_tip (punch_out_button, _("Stop recording at auto-punch end"));
@@ -502,6 +552,7 @@ ARDOUR_UI::setup_transport ()
 	button_height_size_group->add_widget (auto_return_button);
 
 	//tab selections
+	button_height_size_group->add_widget (trigger_page_visibility_button);
 	button_height_size_group->add_widget (recorder_visibility_button);
 	button_height_size_group->add_widget (editor_visibility_button);
 	button_height_size_group->add_widget (mixer_visibility_button);
@@ -568,8 +619,8 @@ ARDOUR_UI::setup_transport ()
 	transport_table.attach (io_latency_value, TCOL, 1, 2 , SHRINK, EXPAND|FILL, hpadding, 0);
 	++col;
 
-	route_latency_value.set_alignment (Gtk::ALIGN_RIGHT, Gtk::ALIGN_CENTER);
-	io_latency_value.set_alignment (Gtk::ALIGN_RIGHT, Gtk::ALIGN_CENTER);
+	route_latency_value.set_alignment (Gtk::ALIGN_END, Gtk::ALIGN_CENTER);
+	io_latency_value.set_alignment (Gtk::ALIGN_END, Gtk::ALIGN_CENTER);
 
 	transport_table.attach (latency_spacer, TCOL, 0, 2 , SHRINK, EXPAND|FILL, 3, 0);
 	++col;
@@ -612,6 +663,13 @@ ARDOUR_UI::setup_transport ()
 	transport_table.attach (*monitor_box, TCOL, 0, 2 , SHRINK, EXPAND|FILL, 3, 0);
 	++col;
 
+	transport_table.attach (cuectrl_spacer, TCOL, 0, 2 , SHRINK, EXPAND|FILL, 3, 0);
+	++col;
+
+	transport_table.attach (_cue_rec_enable, TCOL, 0, 1 , FILL, FILL, 3, 0);
+	transport_table.attach (_cue_play_enable, TCOL, 1, 2 , FILL, FILL, 3, 0);
+	++col;
+
 	/* editor-meter, mini-timeline and selection clock are options in the transport_hbox */
 	transport_hbox.set_spacing (3);
 	transport_table.attach (transport_hbox, TCOL, 0, 2, EXPAND|FILL, EXPAND|FILL, hpadding, 0);
@@ -628,10 +686,11 @@ ARDOUR_UI::setup_transport ()
 	transport_table.attach (scripts_spacer, TCOL, 0, 2 , SHRINK, EXPAND|FILL, 3, 0);
 	++col;
 
-	transport_table.attach (recorder_visibility_button, TCOL,         0, 1 , FILL, SHRINK, hpadding, vpadding);
-	transport_table.attach (mixer_visibility_button,    col, col + 2, 1, 2 , FILL, SHRINK, hpadding, vpadding);
+	transport_table.attach (recorder_visibility_button,     TCOL, 0, 1 , FILL, SHRINK, hpadding, vpadding);
+	transport_table.attach (trigger_page_visibility_button, TCOL, 1, 2 , FILL, SHRINK, hpadding, vpadding);
 	++col;
-	transport_table.attach (editor_visibility_button,   TCOL,         0, 1 , FILL, SHRINK, hpadding, vpadding);
+	transport_table.attach (editor_visibility_button,       TCOL, 0, 1 , FILL, SHRINK, hpadding, vpadding);
+	transport_table.attach (mixer_visibility_button,        TCOL, 1, 2 , FILL, SHRINK, hpadding, vpadding);
 	++col;
 
 	/* initialize */
@@ -678,7 +737,7 @@ ARDOUR_UI::session_latency_updated (bool for_playback)
 		io_latency_value.set_text ("--");
 	} else {
 		samplecnt_t wrl = _session->worst_route_latency ();
-		samplecnt_t wpl = _session->worst_latency_preroll ();
+		samplecnt_t iol = _session->io_latency ();
 		float rate      = _session->nominal_sample_rate ();
 
 		route_latency_value.set_text (samples_as_time_string (wrl, rate));
@@ -688,7 +747,7 @@ ARDOUR_UI::session_latency_updated (bool for_playback)
 			io_latency_value.set_markup ("<span background=\"red\" foreground=\"white\">ambiguous</span>");
 		} else {
 			_ambiguous_latency = false;
-			io_latency_value.set_text (samples_as_time_string (wpl, rate));
+			io_latency_value.set_text (samples_as_time_string (iol, rate));
 		}
 	}
 }

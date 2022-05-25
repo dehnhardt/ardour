@@ -112,6 +112,8 @@ struct TransportFSM
 
 	TransportFSM (TransportAPI& tapi);
 
+	void hard_stop ();
+
 	void start () {
 		init ();
 	}
@@ -186,7 +188,7 @@ struct TransportFSM
 	bool forwards() const             { return _direction_state == Forwards; }
 	bool backwards() const             { return _direction_state == Backwards; }
 	bool reversing() const             { return _direction_state == Reversing; }
-	bool will_roll_fowards() const;
+	bool will_roll_forwards() const;
 
 	void enqueue (Event* ev);
 

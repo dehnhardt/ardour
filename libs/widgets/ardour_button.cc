@@ -206,7 +206,7 @@ ArdourButton::set_text (const std::string& str, bool markup)
 
 	_text = str;
 	_markup = markup;
-	if (!is_realized()) {
+	if (!get_realized()) {
 		return;
 	}
 	ensure_layout ();
@@ -268,6 +268,8 @@ ArdourButton::render (Cairo::RefPtr<Cairo::Context> const& ctx, cairo_rectangle_
 	const bool flat = (_tweaks & ForceFlat) | flat_buttons ();
 
 	const float corner_radius = boxy ? 0 : std::max(2.f, _corner_radius * UIConfigurationBase::instance().get_ui_scale());
+
+	const float scale = UIConfigurationBase::instance().get_ui_scale();
 
 	if (_update_colors) {
 		set_colors ();
@@ -510,7 +512,38 @@ ArdourButton::render (Cairo::RefPtr<Cairo::Context> const& ctx, cairo_rectangle_
 	}
 
 	//Indicator LED
-	if (_elements & Indicator) {
+	if ((_elements & ColorBox)==ColorBox) {
+		cairo_save (cr);
+
+		/* move to the center of the indicator/led */
+		if (_elements & (Text | VectorIcon | IconRenderCallback)) {
+			int led_xoff = ceil((char_pixel_width() + _diameter) * .5);
+			if (_led_left) {
+				cairo_translate (cr, led_xoff, get_height() * .5);
+			} else {
+				cairo_translate (cr, get_width() - led_xoff, get_height() * .5);
+			}
+		} else {
+			cairo_translate (cr, get_width() * .5, get_height() * .5);
+		}
+
+		float size = ceil(std::min (get_width(), get_height())/2 - 3*scale);
+
+		//black border
+		cairo_set_source_rgb (cr, 0, 0, 0);
+		rounded_function (cr, -size, -size, size*2, size*2, corner_radius - 1*scale);
+		cairo_fill(cr);
+
+		//inset by 1 px
+		size = size - 1*scale;
+
+		//led color
+		Gtkmm2ext::set_source_rgba (cr, led_color);
+		rounded_function (cr, -size, -size, size*2, size*2, corner_radius - 2*scale);
+		cairo_fill(cr);
+
+		cairo_restore (cr);
+	} else if (_elements & Indicator) {
 		cairo_save (cr);
 
 		/* move to the center of the indicator/led */
@@ -1065,7 +1098,7 @@ ArdourButton::on_style_changed (const RefPtr<Gtk::Style>& style)
 	if (!_custom_font_set && _layout && _layout->get_font_description () != new_style->get_font ()) {
 		_layout->set_font_description (new_style->get_font ());
 		queue_resize ();
-	} else if (is_realized()) {
+	} else if (get_realized()) {
 		queue_resize ();
 	}
 }
@@ -1077,7 +1110,7 @@ ArdourButton::on_name_changed ()
 	_char_pixel_height = 0;
 	_diameter = 0;
 	_update_colors = true;
-	if (is_realized()) {
+	if (get_realized()) {
 		queue_resize ();
 	}
 }
@@ -1116,7 +1149,7 @@ ArdourButton::set_image (const RefPtr<Gdk::Pixbuf>& img)
 {
 	 _elements = (ArdourButton::Element) (_elements & ~ArdourButton::Text);
 	_pixbuf = img;
-	if (is_realized()) {
+	if (get_realized()) {
 		queue_resize ();
 	}
 }
@@ -1241,7 +1274,7 @@ ArdourButton::set_tweaks (Tweaks t)
 {
 	if (_tweaks != t) {
 		_tweaks = t;
-		if (is_realized()) {
+		if (get_realized()) {
 			queue_resize ();
 		}
 	}
@@ -1270,7 +1303,7 @@ ArdourButton::set_layout_ellipsize_width (int w)
 	if (_layout_ellipsize_width > 3 * PANGO_SCALE) {
 		_layout->set_width (_layout_ellipsize_width - 3 * PANGO_SCALE);
 	}
-	if (is_realized ()) {
+	if (get_realized ()) {
 		queue_resize ();
 	}
 }
@@ -1289,7 +1322,7 @@ ArdourButton::set_text_ellipsize (Pango::EllipsizeMode e)
 	if (_layout_ellipsize_width > 3 * PANGO_SCALE) {
 		_layout->set_width (_layout_ellipsize_width - 3 * PANGO_SCALE);
 	}
-	if (is_realized ()) {
+	if (get_realized ()) {
 		queue_resize ();
 	}
 }

@@ -128,8 +128,8 @@ Polygon::covers (Duple const & point) const
 	Points::size_type j = npoints -1;
 	bool oddNodes = false;
 
-	if (_bounding_box_dirty) {
-		compute_bounding_box ();
+	if (bbox_dirty()) {
+		(void) bounding_box ();
 	}
 
 	for (i = 0; i < npoints; i++) {

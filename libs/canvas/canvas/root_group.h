@@ -27,12 +27,14 @@ namespace ArdourCanvas {
 
 class LIBCANVAS_API Root : public Container
 {
-private:
+  public:
+	void size_request (Distance& w, Distance& h) const;
+
+  private:
 	friend class Canvas;
 
 	Root (Canvas *);
 
-	void compute_bounding_box () const;
 };
 
 }

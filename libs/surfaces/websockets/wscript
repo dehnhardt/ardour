@@ -10,7 +10,7 @@ def options(opt):
     autowaf.set_options(opt)
 
 def configure(conf):
-    autowaf.configure(conf)
+    pass
 
 def build(bld):
     obj = bld(features = 'cxx cxxshlib')
@@ -40,6 +40,9 @@ def build(bld):
     obj.uselib       = 'GLIBMM XML WEBSOCKETS OPENSSL'
     obj.use          = 'libardour libardour_cp libgtkmm2ext libpbd'
     obj.install_path = os.path.join(bld.env['LIBDIR'], 'surfaces')
+
+    if bld.env['build_target'] == 'mingw':
+        obj.defines+= [ '_WIN32_WINNT=0x0601', 'WINVER=0x0601' ]
 
 def shutdown():
     autowaf.shutdown()

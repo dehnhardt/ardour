@@ -57,7 +57,7 @@ bool                          Delivery::panners_legal = false;
 
 Delivery::Delivery (Session& s, boost::shared_ptr<IO> io, boost::shared_ptr<Pannable> pannable,
                     boost::shared_ptr<MuteMaster> mm, const string& name, Role r)
-	: IOProcessor(s, boost::shared_ptr<IO>(), (role_requires_output_ports (r) ? io : boost::shared_ptr<IO>()), name, (r == Send || r == Aux || r == Foldback))
+	: IOProcessor(s, boost::shared_ptr<IO>(), (role_requires_output_ports (r) ? io : boost::shared_ptr<IO>()), name, Temporal::AudioTime, (r == Send || r == Aux || r == Foldback))
 	, _role (r)
 	, _output_buffers (new BufferSet())
 	, _current_gain (GAIN_COEFF_ZERO)
@@ -68,7 +68,7 @@ Delivery::Delivery (Session& s, boost::shared_ptr<IO> io, boost::shared_ptr<Pann
 	if (pannable) {
 		bool is_send = false;
 		if (r & (Delivery::Send|Delivery::Aux|Delivery::Foldback)) is_send = true;
-		_panshell = boost::shared_ptr<PannerShell>(new PannerShell (_name, _session, pannable, is_send));
+		_panshell = boost::shared_ptr<PannerShell>(new PannerShell (_name, _session, pannable, time_domain(), is_send));
 	}
 
 	_display_to_user = false;
@@ -92,7 +92,7 @@ Delivery::Delivery (Session& s, boost::shared_ptr<Pannable> pannable, boost::sha
 	if (pannable) {
 		bool is_send = false;
 		if (r & (Delivery::Send|Delivery::Aux|Delivery::Foldback)) is_send = true;
-		_panshell = boost::shared_ptr<PannerShell>(new PannerShell (_name, _session, pannable, is_send));
+		_panshell = boost::shared_ptr<PannerShell>(new PannerShell (_name, _session, pannable, time_domain(), is_send));
 	}
 
 	_display_to_user = false;
@@ -241,16 +241,16 @@ Delivery::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample
 {
 	assert (_output);
 
+	if (!check_active()) {
+		_output->silence (nframes);
+		return;
+	}
+
 	PortSet& ports (_output->ports());
 	gain_t tgain;
 
 	if (ports.num_ports () == 0) {
-		goto out;
-	}
-
-	if (!_active && !_pending_active) {
-		_output->silence (nframes);
-		goto out;
+		return;
 	}
 
 	/* this setup is not just for our purposes, but for anything that comes after us in the
@@ -283,7 +283,7 @@ Delivery::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample
 			bufs.set_count (output_buffers().count ());
 			Amp::apply_simple_gain (bufs, nframes, GAIN_COEFF_ZERO);
 		}
-		goto out;
+		return;
 
 	} else if (tgain != GAIN_COEFF_UNITY) {
 
@@ -353,13 +353,10 @@ Delivery::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample
 			}
 		}
 	}
-
-out:
-	_active = _pending_active;
 }
 
 XMLNode&
-Delivery::state ()
+Delivery::state () const
 {
 	XMLNode& node (IOProcessor::state ());
 

@@ -52,7 +52,7 @@ Controllable::Controllable (const string& name, Flag f)
 }
 
 XMLNode&
-Controllable::get_state ()
+Controllable::get_state () const
 {
 	XMLNode* node = new XMLNode (xml_node_name);
 
@@ -143,6 +143,17 @@ Controllable::by_id (const ID& id)
 		}
 	}
 	return boost::shared_ptr<Controllable>();
+}
+
+Controllable::ControllableSet
+Controllable::registered_controllables ()
+{
+	ControllableSet rv;
+	Glib::Threads::RWLock::ReaderLock lm (registry_lock);
+	for (auto const& i : registry) {
+		rv.insert (i->shared_from_this ());
+	}
+	return rv;
 }
 
 void

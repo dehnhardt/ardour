@@ -93,7 +93,7 @@ struct PluginParamValueObserver {
 		if (!control) {
 			return;
 		}
-		
+
 		p->update_all (Node::strip_plugin_param_value, strip_id, plugin_id, param_id,
 		               ArdourMixerPlugin::param_value (control));
 	}
@@ -149,7 +149,7 @@ ArdourFeedback::stop ()
 
 	_periodic_connection.disconnect ();
 	_transport_connections.drop_connections ();
-	
+
 	return 0;
 }
 
@@ -210,6 +210,7 @@ bool
 ArdourFeedback::poll () const
 {
 	update_all (Node::transport_time, transport ().time ());
+	update_all (Node::transport_bbt, transport ().bbt ());
 
 	Glib::Threads::Mutex::Lock lock (mixer ().mutex ());
 
@@ -229,8 +230,8 @@ ArdourFeedback::observe_transport ()
 	                                   boost::bind<void> (TransportObserver (), this), event_loop ());
 	sess.RecordStateChanged.connect (_transport_connections, MISSING_INVALIDATOR,
 	                                 boost::bind<void> (RecordStateObserver (), this), event_loop ());
-	sess.tempo_map ().PropertyChanged.connect (_transport_connections, MISSING_INVALIDATOR,
-	                                 boost::bind<void> (TempoObserver (), this), event_loop ());
+
+	Temporal::TempoMap::MapChanged.connect (_transport_connections, MISSING_INVALIDATOR, boost::bind<void> (TempoObserver (), this), event_loop ());
 }
 
 void
@@ -252,7 +253,7 @@ ArdourFeedback::observe_mixer ()
 
 		stripable->mute_control ()->Changed.connect (*it->second, MISSING_INVALIDATOR,
 		                                         boost::bind<void> (StripMuteObserver (), this, strip_id), event_loop ());
-	
+
 		observe_strip_plugins (strip_id, strip->plugins ());
 	}
 }

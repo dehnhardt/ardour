@@ -2,6 +2,7 @@
  * Copyright (C) 2008-2009 Paul Davis <paul@linuxaudiosystems.com>
  * Copyright (C) 2008-2012 Sakari Bergen <sakari.bergen@beatwaves.net>
  * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2022 Robin Gareus <robin@gareus.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,43 +29,39 @@ using namespace PBD;
 
 namespace ARDOUR
 {
-
 /* ExportChannelConfiguration */
 
-ExportChannelConfiguration::ExportChannelConfiguration (Session & session)
-  : session (session)
-  , split (false)
-  , region_type (RegionExportChannelFactory::None)
+ExportChannelConfiguration::ExportChannelConfiguration (Session& session)
+	: session (session)
+	, split (false)
+	, region_type (RegionExportChannelFactory::None)
 {
-
 }
 
-XMLNode &
-ExportChannelConfiguration::get_state ()
+XMLNode&
+ExportChannelConfiguration::get_state () const
 {
-	XMLNode * root = new XMLNode ("ExportChannelConfiguration");
-	XMLNode * channel;
+	XMLNode* root = new XMLNode ("ExportChannelConfiguration");
+	XMLNode* channel;
 
-	root->set_property ("split", get_split());
-	root->set_property ("channels", get_n_chans());
+	root->set_property ("split", get_split ());
+	root->set_property ("channels", get_n_chans ());
 
 	switch (region_type) {
-	case RegionExportChannelFactory::None:
-		// Do nothing
-		break;
-	default:
-		root->set_property ("region-processing", enum_2_string (region_type));
-		break;
+		case RegionExportChannelFactory::None:
+			// Do nothing
+			break;
+		default:
+			root->set_property ("region-processing", enum_2_string (region_type));
+			break;
 	}
 
 	uint32_t i = 1;
-	for (ExportChannelConfiguration::ChannelList::const_iterator c_it = channels.begin(); c_it != channels.end(); ++c_it) {
-		channel = root->add_child ("Channel");
-		if (!channel) { continue; }
-
+	for (auto const& c : channels) {
+		channel = root->add_child ("ExportChannel");
+		channel->set_property ("type", c->state_node_name ());
 		channel->set_property ("number", i);
-		(*c_it)->get_state (channel);
-
+		c->get_state (channel);
 		++i;
 	}
 
@@ -72,7 +69,7 @@ ExportChannelConfiguration::get_state ()
 }
 
 int
-ExportChannelConfiguration::set_state (const XMLNode & root)
+ExportChannelConfiguration::set_state (const XMLNode& root)
 {
 	bool yn;
 	if (root.get_property ("split", yn)) {
@@ -81,14 +78,45 @@ ExportChannelConfiguration::set_state (const XMLNode & root)
 
 	std::string str;
 	if (root.get_property ("region-processing", str)) {
-		set_region_processing_type ((RegionExportChannelFactory::Type)
-			string_2_enum (str, RegionExportChannelFactory::Type));
+		set_region_processing_type ((RegionExportChannelFactory::Type) string_2_enum (str, RegionExportChannelFactory::Type));
 	}
 
+	/* load old state, if any */
 	XMLNodeList channels = root.children ("Channel");
-	for (XMLNodeList::iterator it = channels.begin(); it != channels.end(); ++it) {
+	for (auto const& n : channels) {
 		ExportChannelPtr channel (new PortExportChannel ());
-		channel->set_state (*it, session);
+		channel->set_state (n, session);
+		register_channel (channel);
+	}
+
+	XMLNodeList export_channels = root.children ("ExportChannel");
+	for (auto const& n : export_channels) {
+		std::string type;
+		if (!n->get_property ("type", type)) {
+			assert (0);
+			continue;
+		}
+		ExportChannelPtr channel;
+		if (type == "PortExportChannel") {
+			channel = ExportChannelPtr (new PortExportChannel ());
+		} else if (type == "PortExportMIDI") {
+			channel = ExportChannelPtr (new PortExportMIDI ());
+		} else if (type == "RouteExportChannel") {
+			std::list<ExportChannelPtr> list;
+			RouteExportChannel::create_from_state (list, session, n);
+			if (list.size () > 0) {
+				register_channels (list);
+			}
+			continue;
+		} else if (type == "RegionExportChannel") {
+			/* no state */
+			continue;
+		} else {
+			assert (0);
+			continue;
+		}
+
+		channel->set_state (n, session);
 		register_channel (channel);
 	}
 
@@ -98,15 +126,17 @@ ExportChannelConfiguration::set_state (const XMLNode & root)
 bool
 ExportChannelConfiguration::all_channels_have_ports () const
 {
-	for (ChannelList::const_iterator it = channels.begin(); it != channels.end(); ++it) {
-		if ((*it)->empty ()) { return false; }
+	for (auto const& c : channels) {
+		if (c->empty ()) {
+			return false;
+		}
 	}
 
 	return true;
 }
 
 void
-ExportChannelConfiguration::configurations_for_files (std::list<boost::shared_ptr<ExportChannelConfiguration> > & configs)
+ExportChannelConfiguration::configurations_for_files (std::list<boost::shared_ptr<ExportChannelConfiguration>>& configs)
 {
 	configs.clear ();
 
@@ -115,10 +145,10 @@ ExportChannelConfiguration::configurations_for_files (std::list<boost::shared_pt
 		return;
 	}
 
-	for (ChannelList::const_iterator it = channels.begin (); it != channels.end (); ++it) {
+	for (auto const& c : channels) {
 		boost::shared_ptr<ExportChannelConfiguration> config (new ExportChannelConfiguration (session));
 		config->set_name (_name);
-		config->register_channel (*it);
+		config->register_channel (c);
 		configs.push_back (config);
 	}
 }

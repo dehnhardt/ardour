@@ -12,11 +12,12 @@ function factory () return function ()
 	print ("Worst Input Latency:   ", Session:worst_input_latency ())
 	print ("Worst Track Latency:   ", Session:worst_route_latency ())
 	print ("Worst Latency Preroll: ", Session:worst_latency_preroll ())
+	print ("I/O Latency:           ", Session:io_latency ())
 
 	print (" -- Routes --")
 	for t in Session:get_routes ():iter () do
 		print (string.format ("%-30s  signal-latency: %4d align: %4d play: %4d || in: %4d out: %4d",
-		t:name(),
+		string.sub (t:name(), 0, 30),
 		t:signal_latency (), t:playback_latency (false), t:playback_latency (true),
 		t:input():latency(), t:output():latency()))
 		local i = 0
@@ -54,7 +55,7 @@ function factory () return function ()
 			local bpl = p:public_latency_range (true)
 			local bcl = p:public_latency_range (false)
 			print (string.format ("%-30s  play: (%4d, %4d) (%4d, %4d) (%4d, %4d)  capt: (%4d, %4d) (%4d, %4d) (%4d, %4d)",
-			p:name(),
+			string.sub (p:name(), 0, 30),
 			lp[1].min, lp[1].max, ppl.min, ppl.max, bpl.min, bpl.max,
 			lc[1].min, lc[1].max, pcl.min, pcl.max, bcl.min, bcl.max))
 		end
@@ -68,7 +69,7 @@ function factory () return function ()
 			local bpl = p:public_latency_range (true)
 			local bcl = p:public_latency_range (false)
 			print (string.format ("%-30s  play: (%4d, %4d) (%4d, %4d) (%4d, %4d)  capt: (%4d, %4d) (%4d, %4d) (%4d, %4d)",
-			p:name(),
+			string.sub (p:name(), 0, 30),
 			lp[1].min, lp[1].max, ppl.min, ppl.max, bpl.min, bpl.max,
 			lc[1].min, lc[1].max, pcl.min, pcl.max, bcl.min, bcl.max))
 		end

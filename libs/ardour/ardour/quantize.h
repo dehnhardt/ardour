@@ -29,8 +29,8 @@ namespace ARDOUR {
 class LIBARDOUR_API Quantize : public MidiOperator {
 public:
 	Quantize (bool snap_start, bool snap_end,
-			double start_grid, double end_grid,
-			float strength, float swing, float threshold);
+	          Temporal::Beats start_grid, Temporal::Beats end_grid,
+	          float strength, float swing, Temporal::Beats const & threshold);
 	~Quantize ();
 
 	Command* operator() (boost::shared_ptr<ARDOUR::MidiModel>,
@@ -39,13 +39,13 @@ public:
 	std::string name() const { return std::string ("quantize"); }
 
 private:
-	bool   _snap_start;
-	bool   _snap_end;
-	double _start_grid;
-	double _end_grid;
-	float  _strength;
-	float  _swing;
-	float  _threshold;
+	bool            _snap_start;
+	bool            _snap_end;
+	Temporal::Beats _start_grid;
+	Temporal::Beats _end_grid;
+	float           _strength;
+	float           _swing;
+	Temporal::Beats _threshold;
 };
 
 } /* namespace */

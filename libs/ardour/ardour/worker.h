@@ -23,8 +23,7 @@
 
 #include <stdint.h>
 
-#include <glibmm/threads.h>
-
+#include "pbd/pthread_utils.h"
 #include "pbd/ringbuffer.h"
 #include "pbd/semutils.h"
 
@@ -97,7 +96,7 @@ private:
 	/**
 	   Peek in RB, get size and check if a block of 'size' is available.
 
-	   Handle the unlikley edge-case, if we're called in between the
+	   Handle the unlikely edge-case, if we're called in between the
 	   responder writing 'size' and 'data'.
 
 	   @param rb the ringbuffer to check
@@ -110,7 +109,7 @@ private:
 	PBD::RingBuffer<uint8_t>* _responses;
 	uint8_t*                  _response;
 	PBD::Semaphore            _sem;
-	Glib::Threads::Thread*    _thread;
+	PBD::Thread*              _thread;
 	bool                      _exit;
 	bool                      _synchronous;
 };

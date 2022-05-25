@@ -21,7 +21,7 @@
 #ifndef __CANVAS_BOX_H__
 #define __CANVAS_BOX_H__
 
-#include "canvas/item.h"
+#include "canvas/rectangle.h"
 
 namespace ArdourCanvas
 {
@@ -39,7 +39,7 @@ class Rectangle;
  *
  *   Other?
  */
-class LIBCANVAS_API Box : public Item
+class LIBCANVAS_API Box : public Rectangle
 {
 public:
 	enum Orientation {
@@ -60,14 +60,16 @@ public:
 	void set_border_color (Gtkmm2ext::Color c)  { set_outline_color (c); }
 
 	void add (Item*);
-	void pack_start (Item*, double extra_padding = 0);
-	void pack_end (Item*, double extra_padding = 0);
+	void add_front (Item*);
+	void layout ();
 
 	void set_collapse_on_hide (bool);
 	void set_homogenous (bool);
 
 	void compute_bounding_box () const;
-	void render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) const;
+	void size_request (double& w, double& h) const;
+	void size_allocate_children (Rect const & r);
+	void _size_allocate (Rect const & r);
 
   protected:
 	Orientation orientation;
@@ -75,14 +77,13 @@ public:
 	double top_padding, right_padding, bottom_padding, left_padding;
 	double top_margin, right_margin, bottom_margin, left_margin;
 
-	void child_changed ();
+	void child_changed (bool bbox_changed);
   private:
-	Rectangle *self;
 	bool collapse_on_hide;
 	bool homogenous;
+	mutable bool ignore_child_changes;
 
-	void reset_self ();
-	void reposition_children ();
+	void reposition_children (Distance width, Distance height, bool width_shrink, bool height_shrink);
 };
 
 class LIBCANVAS_API VBox : public Box

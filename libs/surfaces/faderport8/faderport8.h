@@ -75,7 +75,7 @@ public:
 	static bool  probe() { return true; }
 	static void* request_factory (uint32_t);
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	/* configuration GUI */
@@ -107,6 +107,8 @@ public:
 	std::list<boost::shared_ptr<ARDOUR::Bundle> > bundles ();
 
 	size_t tx_midi (std::vector<uint8_t> const&) const;
+
+	CONTROL_PROTOCOL_THREADS_NEED_TEMPO_MAP_DECL();
 
 private:
 	void close ();

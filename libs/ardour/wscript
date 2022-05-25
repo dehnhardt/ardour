@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 # default state file version for this build
-CURRENT_SESSION_FILE_VERSION = 6000
+CURRENT_SESSION_FILE_VERSION = 7000
 
 I18N_PACKAGE = 'ardour'
 
@@ -46,7 +46,7 @@ libardour_sources = [
         'automation_control.cc',
         'automation_list.cc',
         'automation_watch.cc',
-        'beats_samples_converter.cc',
+        # 'beatbox.cc',
         'broadcast_info.cc',
         'buffer.cc',
         'buffer_manager.cc',
@@ -57,6 +57,7 @@ libardour_sources = [
         'chan_count.cc',
         'chan_mapping.cc',
         'circular_buffer.cc',
+        'clip_library.cc',
         'config_text.cc',
         'control_group.cc',
         'control_protocol_manager.cc',
@@ -90,6 +91,7 @@ libardour_sources = [
         'export_handler.cc',
         'export_preset.cc',
         'export_profile_manager.cc',
+        'export_smf_writer.cc',
         'export_status.cc',
         'export_timespan.cc',
         'ffmpegfileimportable.cc',
@@ -105,6 +107,7 @@ libardour_sources = [
         'globals.cc',
         'graph.cc',
         'graphnode.cc',
+        'graph_edges.cc',
         'iec1ppmdsp.cc',
         'iec2ppmdsp.cc',
         'import.cc',
@@ -114,6 +117,7 @@ libardour_sources = [
         'internal_send.cc',
         'interpolation.cc',
         'io.cc',
+        'io_plug.cc',
         'io_processor.cc',
         'kmeterdsp.cc',
         'ladspa_plugin.cc',
@@ -135,7 +139,6 @@ libardour_sources = [
         'midi_model.cc',
         'midi_patch_manager.cc',
         'midi_playlist.cc',
-        'midi_playlist_source.cc',
         'midi_port.cc',
         'midi_region.cc',
         'midi_ring_buffer.cc',
@@ -148,7 +151,9 @@ libardour_sources = [
         'midi_ui.cc',
         'mididm.cc',
         'midiport_manager.cc',
+        'minibpm.cc',
         'mix.cc',
+        'mixer_scene.cc',
         'mode.cc',
         'monitor_control.cc',
         'monitor_port.cc',
@@ -173,6 +178,7 @@ libardour_sources = [
         'playlist.cc',
         'playlist_factory.cc',
         'playlist_source.cc',
+        'plug_insert_base.cc',
         'plugin.cc',
         'plugin_insert.cc',
         'plugin_manager.cc',
@@ -201,13 +207,13 @@ libardour_sources = [
         'return.cc',
         'reverse.cc',
         'route.cc',
-        'route_graph.cc',
         'route_group.cc',
         'route_group_member.cc',
         'rb_effect.cc',
         'rt_tasklist.cc',
         'scene_change.cc',
         'search_paths.cc',
+        'segment_descriptor.cc',
         'selection.cc',
         'send.cc',
         'session.cc',
@@ -248,12 +254,12 @@ libardour_sources = [
         'speakers.cc',
         'srcfilesource.cc',
         'stripable.cc',
+        # 'step_sequencer.cc',
         'strip_silence.cc',
         'system_exec.cc',
         'revision.cc',
         'rt_midibuffer.cc',
         'template_utils.cc',
-        'tempo.cc',
         'tempo_map_importer.cc',
         'thawlist.cc',
         'thread_buffers.cc',
@@ -265,6 +271,7 @@ libardour_sources = [
         'transport_master.cc',
         'transport_master_manager.cc',
         'transpose.cc',
+        'triggerbox.cc',
         'unknown_processor.cc',
         'user_bundle.cc',
         'utils.cc',
@@ -279,24 +286,22 @@ def flac_supported():
     cmd = subprocess.Popen ("sndfile-info testfile.flac",
                             stdout = subprocess.PIPE,
                             stderr = subprocess.STDOUT, shell = True)
-    out = cmd.communicate()[0].decode('utf-8');
-    return re.search ('unknown format', out) == None
+    out = cmd.communicate()[0].decode('utf-8')
+    return re.search ('unknown format', out) is None
 
 def ogg_supported():
     cmd = subprocess.Popen ("sndfile-info testfile.ogg",
                             stdout = subprocess.PIPE,
                             stderr = subprocess.STDOUT, shell = True)
-    out = cmd.communicate()[0].decode('utf-8');
-    return re.search ('unknown format', out) == None
+    out = cmd.communicate()[0].decode('utf-8')
+    return re.search ('unknown format', out) is None
 
 def options(opt):
     autowaf.set_options(opt)
 
 def configure(conf):
-    conf.load('compiler_cxx')
     conf.load('gas')
     # we don't use hard-coded micro versions with ardour, so hard code it to zero
-    autowaf.configure(conf)
     autowaf.check_pkg(conf, 'aubio', uselib_store='AUBIO',
                       atleast_version='0.3.2')
     autowaf.check_pkg(conf, 'aubio', uselib_store='AUBIO4',
@@ -335,8 +340,8 @@ def configure(conf):
     if conf.is_defined ('HAVE_LV2_1_10_0'):
         conf.define ('LV2_EXTENDED', 1)
 
-    autowaf.check_pkg(conf, 'soundtouch', uselib_store='SOUNDTOUCH',
-                      atleast_version='1.8.0', mandatory=False)
+    #autowaf.check_pkg(conf, 'soundtouch', uselib_store='SOUNDTOUCH',
+    #                  atleast_version='1.8.0', mandatory=False)
     autowaf.check_pkg(conf, 'cppunit', uselib_store='CPPUNIT',
                       atleast_version='1.12.0', mandatory=False)
     autowaf.check_pkg(conf, 'ogg', uselib_store='OGG', atleast_version='1.1.2')
@@ -374,7 +379,6 @@ def configure(conf):
 
     if conf.env['WINDOWS_VST_SUPPORT'] == True:
         conf.check(compiler='cxx', lib='gdi32', mandatory=True, uselib_store='GDI32')
-
 
 def build(bld):
     # Library version (UNIX style major, minor, micro)
@@ -488,14 +492,14 @@ def build(bld):
             avx_sources = [ 'sse_functions_avx_linux.cc' ]
             fma_sources = [ 'x86_functions_fma.cc' ]
         elif bld.env['build_target'] == 'mingw':
-                # usability of the 64 bit windows assembler depends on the compiler target,
-                # not the build host, which in turn can only be inferred from the name
-                # of the compiler.
-                if re.search ('x86_64-w64', str(bld.env['CC'])):
-                        obj.source += [ 'sse_functions_xmm.cc' ]
-                        obj.source += [ 'sse_functions_64bit_win.s',  'sse_avx_functions_64bit_win.s' ]
-                        avx_sources = [ 'sse_functions_avx.cc' ]
-                        fma_sources = [ 'x86_functions_fma.cc' ]
+            # usability of the 64 bit windows assembler depends on the compiler target,
+            # not the build host, which in turn can only be inferred from the name
+            # of the compiler.
+            if re.search ('x86_64-w64', str(bld.env['CC'])):
+                obj.source += [ 'sse_functions_xmm.cc' ]
+                obj.source += [ 'sse_functions_64bit_win.s',  'sse_avx_functions_64bit_win.s' ]
+                avx_sources = [ 'sse_functions_avx.cc' ]
+                fma_sources = [ 'x86_functions_fma.cc' ]
         elif bld.env['build_target'] == 'aarch64':
             obj.source += ['arm_neon_functions.cc']
             obj.defines += [ 'ARM_NEON_SUPPORT' ]
@@ -582,14 +586,14 @@ def build(bld):
         if bld.env['SINGLE_TESTS']:
             create_ardour_test_program(bld, obj.includes, 'unit-test-audio_engine', 'test_audio_engine', ['test/audio_engine_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-automation_list_property', 'test_automation_list_property', ['test/automation_list_property_test.cc'])
-            create_ardour_test_program(bld, obj.includes, 'unit-test-bbt', 'test_bbt', ['test/bbt_test.cc'])
+            #create_ardour_test_program(bld, obj.includes, 'unit-test-bbt', 'test_bbt', ['test/bbt_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-fpu', 'test_fpu', ['test/fpu_test.cc'])
-            create_ardour_test_program(bld, obj.includes, 'unit-test-tempo', 'test_tempo', ['test/tempo_test.cc'])
+            #create_ardour_test_program(bld, obj.includes, 'unit-test-tempo', 'test_tempo', ['test/tempo_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-lua_script', 'test_lua_script', ['test/lua_script_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-midi_clock', 'test_midi_clock', ['test/midi_clock_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-resampled_source', 'test_resampled_source', ['test/resampled_source_test.cc'])
-            create_ardour_test_program(bld, obj.includes, 'unit-test-samplewalk_to_beats', 'test_samplewalk_to_beats', ['test/samplewalk_to_beats_test.cc'])
-            create_ardour_test_program(bld, obj.includes, 'unit-test-samplepos_plus_beats', 'test_samplepos_plus_beats', ['test/samplepos_plus_beats_test.cc'])
+            #create_ardour_test_program(bld, obj.includes, 'unit-test-samplewalk_to_beats', 'test_samplewalk_to_beats', ['test/samplewalk_to_beats_test.cc'])
+            #create_ardour_test_program(bld, obj.includes, 'unit-test-samplepos_plus_beats', 'test_samplepos_plus_beats', ['test/samplepos_plus_beats_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-playlist_equivalent_regions', 'test_playlist_equivalent_regions', ['test/playlist_equivalent_regions_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-playlist_layering', 'test_playlist_layering', ['test/playlist_layering_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-plugins', 'test_plugins', ['test/plugins_test.cc'])
@@ -597,30 +601,30 @@ def build(bld):
             create_ardour_test_program(bld, obj.includes, 'unit-test-control_surface', 'test_control_surfaces', ['test/control_surfaces_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-mtdm', 'test_mtdm', ['test/mtdm_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-sha1', 'test_sha1', ['test/sha1_test.cc'])
-            create_ardour_test_program(bld, obj.includes, 'unit-test-session', 'test_session', ['test/session_test.cc'])
+            #create_ardour_test_program(bld, obj.includes, 'unit-test-session', 'test_session', ['test/session_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-dsp_load_calculator', 'test_dsp_load_calculator', ['test/dsp_load_calculator_test.cc'])
 
-        test_sources  = '''
-            test/audio_engine_test.cc
-            test/automation_list_property_test.cc
-            test/bbt_test.cc
-            test/dsp_load_calculator_test.cc
-            test/fpu_test.cc
-            test/tempo_test.cc
-            test/lua_script_test.cc
-            test/midi_clock_test.cc
-            test/resampled_source_test.cc
-            test/samplewalk_to_beats_test.cc
-            test/samplepos_plus_beats_test.cc
-            test/playlist_equivalent_regions_test.cc
-            test/playlist_layering_test.cc
-            test/plugins_test.cc
-            test/region_naming_test.cc
-            test/control_surfaces_test.cc
-            test/mtdm_test.cc
-            test/sha1_test.cc
-            test/session_test.cc
-        '''.split()
+        test_sources  = [
+            'test/audio_engine_test.cc',
+            'test/automation_list_property_test.cc',
+            #'test/bbt_test.cc',
+            'test/dsp_load_calculator_test.cc',
+            'test/fpu_test.cc',
+            #'test/tempo_test.cc',
+            'test/lua_script_test.cc',
+            'test/midi_clock_test.cc',
+            'test/resampled_source_test.cc',
+            #'test/samplewalk_to_beats_test.cc',
+            #'test/samplepos_plus_beats_test.cc',
+            'test/playlist_equivalent_regions_test.cc',
+            'test/playlist_layering_test.cc',
+            'test/plugins_test.cc',
+            'test/region_naming_test.cc',
+            'test/control_surfaces_test.cc',
+            'test/mtdm_test.cc',
+            'test/sha1_test.cc',
+            #'test/session_test.cc',
+        ]
 
 # Tests that don't work
 #                test/playlist_read_test.cc

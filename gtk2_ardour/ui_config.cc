@@ -21,18 +21,13 @@
  */
 
 #include <iostream>
-#include <sstream>
-#include <unistd.h>
 #include <cerrno>
 #include <cstdlib>
 #include <cstdio> /* for snprintf, grrr */
 #include <cstring>
 
 #include <glib.h>
-#include "pbd/gstdio_compat.h"
 #include <glibmm/miscutils.h>
-
-#include <cairo/cairo.h>
 
 #include <pango/pangoft2.h> // for fontmap resolution control for GnomeCanvas
 #include <pango/pangocairo.h> // for fontmap resolution control for GnomeCanvas
@@ -54,8 +49,9 @@
 #include "ardour/utils.h"
 #include "ardour/types_convert.h"
 
-#include "gtkmm2ext/rgb_macros.h"
 #include "gtkmm2ext/gtk_ui.h"
+
+#include "canvas/text.h"
 
 #include "ui_config.h"
 
@@ -98,6 +94,15 @@ UIConfiguration::UIConfiguration ()
 {
 	load_state();
 
+	/* Setup defaults */
+	if (get_freesound_dir ().empty ()) {
+		std::string const& d (Glib::build_filename (ARDOUR::user_cache_directory (), "freesound"));
+		set_freesound_dir (d);
+		if (!Glib::file_test (d, Glib::FILE_TEST_EXISTS)) {
+			g_mkdir_with_parents (d.c_str (), 0755);
+		}
+	}
+
 	ColorsChanged.connect (boost::bind (&UIConfiguration::colors_changed, this));
 
 	ParameterChanged.connect (sigc::mem_fun (*this, &UIConfiguration::parameter_changed));
@@ -133,6 +138,8 @@ UIConfiguration::parameter_changed (string param)
 		load_rc_file (true);
 	} else if (param == "color-file") {
 		load_color_theme (true);
+	} else if (param == "font-scale") {
+		ArdourCanvas::Text::drop_height_maps ();
 	}
 
 	save_state ();
@@ -508,7 +515,7 @@ UIConfiguration::save_state()
 }
 
 XMLNode&
-UIConfiguration::get_state ()
+UIConfiguration::get_state () const
 {
 	XMLNode* root;
 
@@ -525,7 +532,7 @@ UIConfiguration::get_state ()
 }
 
 XMLNode&
-UIConfiguration::get_variables (std::string which_node)
+UIConfiguration::get_variables (std::string which_node) const
 {
 	XMLNode* node;
 

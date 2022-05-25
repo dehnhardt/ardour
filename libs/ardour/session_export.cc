@@ -152,8 +152,7 @@ Session::start_audio_export (samplepos_t position, bool realtime, bool region_ex
 	} while (_transport_fsm->waiting_for_butler() && --timeout > 0);
 
 	if (timeout == 0) {
-		error << _("Cannot prepare transport for export") << endmsg;
-		return -1;
+		_transport_fsm->hard_stop ();
 	}
 
 	/* We're about to call Track::seek, so the butler must have finished everything
@@ -165,7 +164,13 @@ Session::start_audio_export (samplepos_t position, bool realtime, bool region_ex
 		Glib::Threads::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
 		_butler->wait_until_finished ();
 
-	/* get everyone to the right position */
+		/* This method may be called from a thread start_timespan_bg(),
+		 * or from the GUI thread. We need to set/update the tempo-map
+		 * thread-local variable before calling Track::seek
+		 */
+		Temporal::TempoMap::update_thread_tempo_map ();
+
+		/* get everyone to the right position */
 
 		boost::shared_ptr<RouteList> rl = routes.reader();
 
@@ -267,6 +272,9 @@ Session::process_export (pframes_t nframes)
 		if (ProcessExport (nframes).value_or (0) > 0) {
 			/* last cycle completed */
 			assert (_export_rolling);
+			if (!_realtime_export) {
+				_transport_fsm->hard_stop ();
+			}
 			stop_audio_export ();
 		}
 
@@ -280,6 +288,9 @@ void
 Session::process_export_fw (pframes_t nframes)
 {
 	if (!_export_rolling) {
+		if (_realtime_export) {
+			fail_roll (nframes);
+		}
 		try {
 			ProcessExport (0);
 		} catch (std::exception & e) {
@@ -396,8 +407,10 @@ Session::stop_audio_export ()
 	   stuff that stop_transport() implements.
 	*/
 
-	realtime_stop (true, true);
-	flush_all_inserts ();
+	if (!_realtime_export) {
+		realtime_stop (true, true);
+		flush_all_inserts ();
+	}
 	_export_rolling = false;
 	_butler->schedule_transport_work ();
 	reset_xrun_count ();

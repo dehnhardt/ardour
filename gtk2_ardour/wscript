@@ -17,11 +17,10 @@ import copy
 top = '.'
 out = 'build'
 
-from waflib import TaskGen
 @TaskGen.extension('.m')
 def m_hook(self, node):
-	"""Alias .m files to be compiled the same as .c files, gcc will do the right thing."""
-	return self.create_compiled_task('c', node)
+    """Alias .m files to be compiled the same as .c files, gcc will do the right thing."""
+    return self.create_compiled_task('c', node)
 
 path_prefix = 'gtk2_ardour/'
 
@@ -50,8 +49,12 @@ gtk2_ardour_sources = [
         'ardour_ui_video.cc',
         'ardour_window.cc',
         'audio_clock.cc',
+        'audio_clip_editor.cc',
         'audio_region_editor.cc',
         'audio_region_view.cc',
+        'audio_region_operations_box.cc',
+        'audio_region_properties_box.cc',
+        'audio_trigger_properties_box.cc',
         'audio_streamview.cc',
         'audio_time_axis.cc',
         'automation_controller.cc',
@@ -60,6 +63,8 @@ gtk2_ardour_sources = [
         'automation_streamview.cc',
         'automation_time_axis.cc',
         'axis_view.cc',
+        # 'beatbox_gui.cc',
+        'bbt_marker_dialog.cc',
         'big_clock_window.cc',
         'big_transport_window.cc',
         'bundle_manager.cc',
@@ -69,6 +74,7 @@ gtk2_ardour_sources = [
         'control_point.cc',
         'control_point_dialog.cc',
         'control_slave_ui.cc',
+        'cuebox_ui.cc',
         'cursor_context.cc',
         'curvetest.cc',
         'debug.cc',
@@ -117,6 +123,7 @@ gtk2_ardour_sources = [
         'export_preset_selector.cc',
         'export_report.cc',
         'export_timespan_selector.cc',
+        'fitted_canvas_widget.cc',
         'fft.cc',
         'fft_graph.cc',
         'fft_result.cc',
@@ -135,6 +142,7 @@ gtk2_ardour_sources = [
         'instrument_selector.cc',
         'interthread_progress_window.cc',
         'io_button.cc',
+        'io_plugin_window.cc',
         'io_selector.cc',
         'hit.cc',
         'keyboard.cc',
@@ -155,10 +163,14 @@ gtk2_ardour_sources = [
         'midi_automation_line.cc',
         'midi_channel_dialog.cc',
         'midi_channel_selector.cc',
+        'midi_clip_editor.cc',
         'midi_cut_buffer.cc',
         'midi_export_dialog.cc',
         'midi_list_editor.cc',
         'midi_region_view.cc',
+        'midi_region_operations_box.cc',
+        'midi_region_properties_box.cc',
+        'midi_trigger_properties_box.cc',
         'midi_scroomer.cc',
         'midi_selection.cc',
         'midi_streamview.cc',
@@ -180,6 +192,7 @@ gtk2_ardour_sources = [
         'mono_panner.cc',
         'mono_panner_editor.cc',
         'mouse_cursors.cc',
+        'multi_region_properties_box.cc',
         'nag.cc',
         'new_plugin_preset_dialog.cc',
         'new_user_wizard.cc',
@@ -237,6 +250,7 @@ gtk2_ardour_sources = [
         'region_editor.cc',
         'region_gain_line.cc',
         'region_layering_order_editor.cc',
+        'region_list_base.cc',
         'region_peak_cursor.cc',
         'region_selection.cc',
         'region_view.cc',
@@ -244,6 +258,7 @@ gtk2_ardour_sources = [
         'rhythm_ferret.cc',
         'route_group_dialog.cc',
         'route_group_menu.cc',
+        'route_list_base.cc',
         'route_params_ui.cc',
         'route_processor_selection.cc',
         'route_time_axis.cc',
@@ -255,6 +270,7 @@ gtk2_ardour_sources = [
         'screensaver.cc',
         'script_selector.cc',
         'selection.cc',
+        'selection_properties_box.cc',
         'selection_memento.cc',
         'send_ui.cc',
         'session_archive_dialog.cc',
@@ -264,6 +280,8 @@ gtk2_ardour_sources = [
         'session_option_editor.cc',
         'sfdb_ui.cc',
         'shuttle_control.cc',
+        'slot_properties_box.cc',
+        'source_list_base.cc',
         'soundcloud_export_selector.cc',
         'splash.cc',
         'speaker_dialog.cc',
@@ -295,6 +313,16 @@ gtk2_ardour_sources = [
         'transport_control_ui.cc',
         'transport_masters_dialog.cc',
         'transpose_dialog.cc',
+        'trigger_clip_picker.cc',
+        'trigger_jump_dialog.cc',
+        'trigger_page.cc',
+        'trigger_region_list.cc',
+        'trigger_route_list.cc',
+        'trigger_source_list.cc',
+        'trigger_strip.cc',
+        'trigger_master.cc',
+        'trigger_ui.cc',
+        'triggerbox_ui.cc',
         'ui_config.cc',
         'utils.cc',
         'varispeed_dialog.cc',
@@ -303,7 +331,7 @@ gtk2_ardour_sources = [
         'virtual_keyboard_window.cc',
         'visibility_group.cc',
         'window_manager.cc',
-# video-timeline related sources:
+        # video-timeline related sources:
         'video_image_frame.cc',
         'add_video_dialog.cc',
         'editor_videotimeline.cc',
@@ -314,8 +342,7 @@ gtk2_ardour_sources = [
         'transcode_video_dialog.cc',
         'video_server_dialog.cc',
         'utils_videotl.cc',
-        'export_video_dialog.cc',
-        'export_video_infobox.cc'
+        'export_video_dialog.cc'
 ]
 
 def enoify (major, minor):
@@ -405,8 +432,6 @@ def options(opt):
 
 def configure(conf):
     conf.load('misc')
-    conf.load('compiler_cxx')
-    autowaf.configure(conf)
 
     # TODO: Insert a sanity check for on OS X to ensure CoreAudio is present
 
@@ -450,7 +475,7 @@ def configure(conf):
     conf.define('CODENAME', enoify(int(conf.env['MAJOR']), int(conf.env['MINOR'])))
     conf.env['define_key'] = ['VERSIONSTRING', 'CODENAME' ]
     conf.write_config_header('gtk2ardour-version.h')
-    conf.env['define_key'] = bak;
+    conf.env['define_key'] = bak
 
     # Boost headers
     autowaf.check_header(conf, 'cxx', 'boost/shared_ptr.hpp')
@@ -468,7 +493,6 @@ def _doPyp(infileName, deps = False):
     inLines = fd.readlines()
     if fd != sys.stdin:
         fd.close()
-
 
     for line in inLines:
         bits = re_spaces.split(line)
@@ -496,7 +520,6 @@ def include_processor(task):
     fdOut = open (outfileName, "w")
     fdOut.write (_doPyp(infileName))
     fdOut.close ()
-
 
 def build_color_scheme(path, prefix):
     f = open (path, 'r')
@@ -597,7 +620,6 @@ def build(bld):
 #        # obj.source += [ 'canvas_test.cc', ]
 #        obj.source += [ 'toolbar_test.cc', 'enums.cc']
 
-
     # executable version of the GTK GUI
     if bld.env['build_target'] == 'mingw':
         obj = bld (features = 'cxx c cxxprogram winres')
@@ -649,8 +671,6 @@ def build(bld):
 
     obj.includes += ['../libs']
     obj.includes += ['../libs/vst3']
-
-    obj.use += 'libptformat'
 
     if bld.env['build_target'] == 'mingw':
         obj.linkflags += ' -mwindows'
@@ -797,8 +817,8 @@ def build(bld):
 
     # @FONT_SIZE_XXXX@
     for sizename,points in iter(font_sizes.items()):
-            key = "_".join (['FONT_SIZE',sizename])
-            font_subst_dict[key] = points
+        key = "_".join (['FONT_SIZE',sizename])
+        font_subst_dict[key] = points
 
     # various font names, eg @BOLD_MONOSPACE@
     for font_sym,text in iter(font_names.items()):
@@ -878,7 +898,7 @@ def build(bld):
         obj.source       = 'ardour-mime-info.xml'
         obj.target       = 'ardour.xml'
         obj.chmod        = Utils.O644
-        bld.install_files (os.path.join (bld.env['PREFIX'], 'share/mime/application'), 'ardour' + '.xml')
+        bld.install_files (os.path.join (bld.env['PREFIX'], 'share/mime/packages'), obj.target)
 
         # build appdata with translations
         appdata_i18n_mo(bld)
@@ -908,7 +928,7 @@ def build(bld):
     for b in [ 'ardour' ] :
         obj = bld(
             target = b + '.keys',
-            source = [ b + '.keys.in', 'mixer.bindings', 'processor_box.bindings', 'step_editing.bindings', 'monitor.bindings' ],
+            source = [ b + '.keys.in', 'mixer.bindings', 'processor_box.bindings', 'step_editing.bindings', 'monitor.bindings', 'trigger.bindings', 'clip_editor.bindings' ],
             rule = a_rule
             )
         obj.install_path = bld.env['CONFDIR']
@@ -932,7 +952,7 @@ def build(bld):
     bld.install_files(bld.env['CONFDIR'], 'default_ui_config')
     # Color Themes. Find each color file for this program only
     # and install
-    bld.install_files (os.path.join(bld.env['DATADIR'], 'themes'), bld.path.ant_glob ('themes/*-' + pgmname.lower() + '.colors'));
+    bld.install_files (os.path.join(bld.env['DATADIR'], 'themes'), bld.path.ant_glob ('themes/*-' + pgmname.lower() + '.colors'))
 
     # Default export stuff
     bld.install_files(os.path.join(bld.env['CONFDIR'], 'export'), bld.path.ant_glob('export/*.format'))
@@ -946,28 +966,28 @@ def build(bld):
                             mo)
 
 def i18n(bld):
-        I18N_PACKAGE = 'gtk2_ardour' + bld.env['MAJOR']
-        autowaf.build_i18n(bld, top, 'gtk2_ardour', I18N_PACKAGE, gtk2_ardour_sources,
-                           'Paul Davis')
-        appdata_i18n_pot(bld)
-        appdata_i18n_po(bld)
+    I18N_PACKAGE = 'gtk2_ardour' + bld.env['MAJOR']
+    autowaf.build_i18n(bld, top, 'gtk2_ardour', I18N_PACKAGE, gtk2_ardour_sources,
+                       'Paul Davis')
+    appdata_i18n_pot(bld)
+    appdata_i18n_po(bld)
 
 def i18n_pot(bld):
-        I18N_PACKAGE = 'gtk2_ardour' + bld.env['MAJOR']
-        autowaf.build_i18n_pot(bld, top, 'gtk2_ardour', I18N_PACKAGE, gtk2_ardour_sources,
-                               'Paul Davis')
-        appdata_i18n_pot(bld)
+    I18N_PACKAGE = 'gtk2_ardour' + bld.env['MAJOR']
+    autowaf.build_i18n_pot(bld, top, 'gtk2_ardour', I18N_PACKAGE, gtk2_ardour_sources,
+                           'Paul Davis')
+    appdata_i18n_pot(bld)
 
 def i18n_po(bld):
-        I18N_PACKAGE = 'gtk2_ardour' + bld.env['MAJOR']
-        autowaf.build_i18n_po(bld, top, 'gtk2_ardour', I18N_PACKAGE, gtk2_ardour_sources,
-                              'Paul Davis')
-        appdata_i18n_po(bld)
+    I18N_PACKAGE = 'gtk2_ardour' + bld.env['MAJOR']
+    autowaf.build_i18n_po(bld, top, 'gtk2_ardour', I18N_PACKAGE, gtk2_ardour_sources,
+                          'Paul Davis')
+    appdata_i18n_po(bld)
 
 def i18n_mo(bld):
-        I18N_PACKAGE = 'gtk2_ardour' + bld.env['MAJOR']
-        autowaf.build_i18n_mo(bld, top, 'gtk2_ardour', I18N_PACKAGE, gtk2_ardour_sources,
-                              'Paul Davis')
+    I18N_PACKAGE = 'gtk2_ardour' + bld.env['MAJOR']
+    autowaf.build_i18n_mo(bld, top, 'gtk2_ardour', I18N_PACKAGE, gtk2_ardour_sources,
+                          'Paul Davis')
 
 def appdata_i18n_pot(bld):
     potfile = os.path.join(bld.top_dir, 'gtk2_ardour', 'appdata',
@@ -979,9 +999,9 @@ def appdata_i18n_pot(bld):
                 'ardour.appdata.xml.in.in')
         Logs.info('Updating ' + potfile)
         try:
-                subprocess.call(('itstool', '-i', itsfile, '-o', potfile, adsource))
+            subprocess.call(('itstool', '-i', itsfile, '-o', potfile, adsource))
         except:
-                print ('Error processing appdata pot file - ignored')
+            print ('Error processing appdata pot file - ignored')
     elif bld.cmd == 'clean' and os.path.exists(potfile):
         Logs.info('Removing Ardour appdata pot file')
         os.remove(potfile)

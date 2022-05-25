@@ -48,8 +48,8 @@ const string DiskIOProcessor::state_node_name = X_("DiskIOProcessor");
 // PBD::Signal0<void> DiskIOProcessor::DiskOverrun;
 // PBD::Signal0<void>  DiskIOProcessor::DiskUnderrun;
 
-DiskIOProcessor::DiskIOProcessor (Session& s, Track& t, string const & str, Flag f)
-	: Processor (s, str)
+DiskIOProcessor::DiskIOProcessor (Session& s, Track& t, string const & str, Flag f, Temporal::TimeDomain td)
+	: Processor (s, str, td)
 	, _flags (f)
 	, _slaved (false)
 	, in_set_state (false)
@@ -349,14 +349,14 @@ DiskIOProcessor::ChannelInfo::~ChannelInfo ()
  */
 void
 DiskIOProcessor::get_location_times(const Location* location,
-                   samplepos_t*     start,
-                   samplepos_t*     end,
-                   samplepos_t*     length)
+                   timepos_t*     start,
+                   timepos_t*     end,
+                   timecnt_t*     length)
 {
 	if (location) {
 		*start  = location->start();
 		*end    = location->end();
-		*length = *end - *start;
+		*length = location->length();
 	}
 }
 

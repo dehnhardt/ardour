@@ -29,16 +29,24 @@
 
 #include "evoral/Event.h"
 #include "evoral/EventSink.h"
+#include "evoral/midi_util.h"
+
 #include "ardour/types.h"
 
 namespace ARDOUR {
 
 class MidiBuffer;
-class MidiStateTracker;
+class MidiNoteTracker;
 
 /**  */
 class LIBARDOUR_API RTMidiBuffer : public Evoral::EventSink<samplepos_t>
 {
+  private:
+	struct Blob {
+		uint32_t size;
+		uint8_t data[0];
+	};
+
   public:
 	typedef samplepos_t TimeType;
 
@@ -48,9 +56,12 @@ class LIBARDOUR_API RTMidiBuffer : public Evoral::EventSink<samplepos_t>
 	void clear();
 	void resize(size_t);
 	size_t size() const { return _size; }
+	bool empty() const { return _size == 0; }
+
+	samplecnt_t span() const;
 
 	uint32_t write (TimeType time, Evoral::EventType type, uint32_t size, const uint8_t* buf);
-	uint32_t read (MidiBuffer& dst, samplepos_t start, samplepos_t end, MidiStateTracker& tracker, samplecnt_t offset = 0);
+	uint32_t read (MidiBuffer& dst, samplepos_t start, samplepos_t end, MidiNoteTracker& tracker, samplecnt_t offset = 0);
 
 	void dump (uint32_t);
 	void reverse ();
@@ -64,13 +75,37 @@ class LIBARDOUR_API RTMidiBuffer : public Evoral::EventSink<samplepos_t>
 		};
 	};
 
+	Item const & operator[](size_t n) const {
+		if (n >= _size) {
+			throw std::exception ();
+		}
+		return _data[n];
+	}
+
+	uint8_t const * bytes (Item const & item, uint32_t& size) {
+		if (!item.bytes[0]) {
+			size = Evoral::midi_event_size (item.bytes[1]);
+			return &item.bytes[1];
+		} else {
+			uint32_t offset = item.offset & ~(1<<(CHAR_BIT-1));
+			Blob* blob = reinterpret_cast<Blob*> (&_pool[offset]);
+
+			size = blob->size;
+			return blob->data;
+		}
+	}
+
+	void shift (sampleoffset_t distance) {
+		if (_size == 0) {
+			return;
+		}
+		for (size_t n = 0; n < _size; ++n) {
+			_data[n].timestamp += distance;
+		}
+	}
+
   private:
 	friend struct WriteProtectRender;
-
-	struct Blob {
-		uint32_t size;
-		uint8_t data[0];
-	};
 
 	/* The main store. Holds Items (timestamp+up to 3 bytes of data OR
 	 * offset into secondary storage below)

@@ -66,6 +66,7 @@ private:
 	void update_minitimeline ();
 	void draw_dots (cairo_t*, int left, int right, int y, Gtkmm2ext::Color);
 	int  draw_mark (cairo_t*, int x0, int x1, const std::string&, bool& prelight);
+	int  draw_cue (cairo_t*, int x0, int next_cue_left_edge, int tl_width, int cue_index, bool& prelight);
 	int  draw_edge (cairo_t*, int x0, int x1, bool left, const std::string&, bool& prelight);
 
 	void render (Cairo::RefPtr<Cairo::Context> const&, cairo_rectangle_t*);
@@ -83,6 +84,7 @@ private:
 	Glib::RefPtr<Pango::Layout> _layout;
 	sigc::connection super_rapid_connection;
 	PBD::ScopedConnectionList marker_connection;
+	PBD::ScopedConnectionList tempo_map_connection;
 	PBD::ScopedConnectionList session_connection;
 
 	samplepos_t _last_update_sample;

@@ -55,7 +55,7 @@ using namespace PBD;
 using namespace Gtk;
 using namespace Gtkmm2ext;
 
-TimeFXDialog::TimeFXDialog (Editor& e, bool pitch, samplecnt_t oldlen, samplecnt_t new_length, samplepos_t position)
+TimeFXDialog::TimeFXDialog (Editor& e, bool pitch, timecnt_t const & oldlen, timecnt_t const & new_length, timepos_t const & position)
 	: ArdourDialog (X_("time fx dialog"))
 	, editor (e)
 	, pitching (pitch)
@@ -100,7 +100,7 @@ TimeFXDialog::TimeFXDialog (Editor& e, bool pitch, samplecnt_t oldlen, samplecnt
 
 	upper_button_box.set_spacing (6);
 
-	l = manage (new Label (_("<b>Options</b>"), Gtk::ALIGN_LEFT, Gtk::ALIGN_CENTER, false ));
+	l = manage (new Label (_("<b>Options</b>"), Gtk::ALIGN_START, Gtk::ALIGN_CENTER, false ));
 	l->set_use_markup ();
 
 	upper_button_box.pack_start (*l, false, false);
@@ -109,21 +109,21 @@ TimeFXDialog::TimeFXDialog (Editor& e, bool pitch, samplecnt_t oldlen, samplecnt
 		Table* table = manage (new Table (4, 3, false));
 		table->set_row_spacings	(6);
 		table->set_col_spacing	(1, 6);
-		l = manage (new Label ("", Gtk::ALIGN_LEFT, Gtk::ALIGN_CENTER, false )); //Common gnome way for padding
+		l = manage (new Label ("", Gtk::ALIGN_START, Gtk::ALIGN_CENTER, false )); //Common gnome way for padding
 		l->set_padding (8, 0);
 		table->attach (*l, 0, 1, 0, 4, Gtk::FILL, Gtk::FILL, 0, 0);
 
-		l = manage (new Label (_("Octaves:"), Gtk::ALIGN_LEFT, Gtk::ALIGN_CENTER, false));
+		l = manage (new Label (_("Octaves:"), Gtk::ALIGN_START, Gtk::ALIGN_CENTER, false));
 		table->attach (*l, 1, 2, 0, 1, Gtk::FILL, Gtk::EXPAND, 0, 0);
 		table->attach (pitch_octave_spinner, 2, 3, 0, 1, Gtk::FILL, Gtk::EXPAND & Gtk::FILL, 0, 0);
 		pitch_octave_spinner.set_activates_default ();
 
-		l = manage (new Label (_("Semitones:"), Gtk::ALIGN_LEFT, Gtk::ALIGN_CENTER, false));
+		l = manage (new Label (_("Semitones:"), Gtk::ALIGN_START, Gtk::ALIGN_CENTER, false));
 		table->attach (*l, 1, 2, 1, 2, Gtk::FILL, Gtk::EXPAND, 0, 0);
 		table->attach (pitch_semitone_spinner, 2, 3, 1, 2, Gtk::FILL, Gtk::EXPAND & Gtk::FILL, 0, 0);
 		pitch_semitone_spinner.set_activates_default ();
 
-		l = manage (new Label (_("Cents:"), Gtk::ALIGN_LEFT, Gtk::ALIGN_CENTER, false));
+		l = manage (new Label (_("Cents:"), Gtk::ALIGN_START, Gtk::ALIGN_CENTER, false));
 		pitch_cent_spinner.set_digits (1);
 		table->attach (*l, 1, 2, 2, 3, Gtk::FILL, Gtk::EXPAND, 0, 0);
 		table->attach (pitch_cent_spinner, 2, 3, 2, 3, Gtk::FILL, Gtk::EXPAND & Gtk::FILL, 0, 0);
@@ -145,7 +145,7 @@ TimeFXDialog::TimeFXDialog (Editor& e, bool pitch, samplecnt_t oldlen, samplecnt
 		vector<string> strings;
 		duration_clock = manage (new AudioClock (X_("stretch"), true, X_("stretch"), true, false, true, false, true));
 		duration_clock->set_session (e.session());
-		duration_clock->set (new_length, true);
+		duration_clock->set (timepos_t (new_length), true);
 		duration_clock->set_mode (AudioClock::BBT);
 		duration_clock->set_bbt_reference (position);
 
@@ -158,7 +158,7 @@ TimeFXDialog::TimeFXDialog (Editor& e, bool pitch, samplecnt_t oldlen, samplecnt
 		table->attach (*clock_align, 1, 2, row, row+1, Gtk::AttachOptions (Gtk::EXPAND|Gtk::FILL), Gtk::FILL, 0, 0);
 		row++;
 
-		const double fract = ((double) new_length) / original_length;
+		const double fract = (double) (new_length / original_length);
 		/* note the *100.0 to convert fract into a percentage */
 		duration_adjustment.set_value (fract*100.0);
 		Gtk::SpinButton* spinner = manage (new Gtk::SpinButton (duration_adjustment, 1.0, 3));
@@ -202,7 +202,7 @@ TimeFXDialog::TimeFXDialog (Editor& e, bool pitch, samplecnt_t oldlen, samplecnt
 	VBox* progress_box = manage (new VBox);
 	progress_box->set_spacing (6);
 
-	l = manage (new Label (_("<b>Progress</b>"), Gtk::ALIGN_LEFT, Gtk::ALIGN_CENTER, false));
+	l = manage (new Label (_("<b>Progress</b>"), Gtk::ALIGN_START, Gtk::ALIGN_CENTER, false));
 	l->set_use_markup ();
 
 	progress_box->pack_start (*l, false, false);
@@ -259,14 +259,14 @@ TimeFXDialog::delete_in_progress (GdkEventAny*)
 	return TRUE;
 }
 
-float
+Temporal::ratio_t
 TimeFXDialog::get_time_fraction () const
 {
 	if (pitching) {
-		return 1.0;
+		return Temporal::ratio_t (1, 1);
 	}
 
-	return duration_adjustment.get_value() / 100.0;
+	return Temporal::ratio_t (duration_adjustment.get_value(), 100);
 }
 
 float
@@ -301,7 +301,7 @@ TimeFXDialog::duration_adjustment_changed ()
 
 	PBD::Unwinder<bool> uw (ignore_clock_change, true);
 
-	duration_clock->set ((samplecnt_t) (original_length * (duration_adjustment.get_value()/ 100.0)));
+	duration_clock->set_duration (original_length * Temporal::ratio_t (1.0, (duration_adjustment.get_value() / 100.0)));
 }
 
 void
@@ -313,5 +313,5 @@ TimeFXDialog::duration_clock_changed ()
 
 	PBD::Unwinder<bool> uw (ignore_adjustment_change, true);
 
-	duration_adjustment.set_value (100.0 * (duration_clock->current_duration() / (double) original_length));
+	duration_adjustment.set_value (100.0 * (double) (duration_clock->current_duration() / original_length));
 }

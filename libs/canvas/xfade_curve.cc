@@ -115,7 +115,7 @@ XFadeCurve::compute_bounding_box () const
 		_bounding_box = Rect ();
 	}
 
-	_bounding_box_dirty = false;
+	set_bbox_clean ();
 }
 
 void
@@ -127,7 +127,7 @@ XFadeCurve::set_inout (Points const & in, Points const & out)
 	begin_change ();
 	_in.points = in;
 	_out.points = out;
-	_bounding_box_dirty = true;
+	set_bbox_dirty ();
 	interpolate ();
 	end_change ();
 }

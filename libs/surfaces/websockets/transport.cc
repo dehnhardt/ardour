@@ -16,27 +16,34 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include <sstream>
+
 #include "ardour/tempo.h"
 
 #include "transport.h"
 
 using namespace ARDOUR;
 using namespace ArdourSurface;
+using namespace Temporal;
 
 double
 ArdourTransport::tempo () const
 {
-	Tempo tempo = session ().tempo_map ().tempo_at_sample (0);
-	return tempo.note_type () * tempo.pulses_per_minute ();
+	const Tempo& tempo (TempoMap::fetch()->metric_at (0).tempo());
+	return tempo.note_types_per_minute ();
 }
 
 void
 ArdourTransport::set_tempo (double bpm)
 {
-	bpm                 = std::max (0.01, bpm);
-	TempoMap& tempo_map = session ().tempo_map ();
-	Tempo     tempo (bpm, tempo_map.tempo_at_sample (0).note_type (), bpm);
-	tempo_map.add_tempo (tempo, 0.0, 0, AudioTime);
+	bpm = std::max (0.01, bpm);
+
+	TempoMap::WritableSharedPtr tmap (TempoMap::write_copy());
+
+	Tempo tempo (bpm, tmap->metric_at (0).tempo().note_type ());
+
+	tmap->set_tempo (tempo, timepos_t());
+	TempoMap::update (tmap);
 }
 
 double
@@ -45,6 +52,16 @@ ArdourTransport::time () const
 	samplepos_t t = session ().transport_sample ();
 	samplecnt_t f = session ().sample_rate ();
 	return static_cast<double>(t) / static_cast<double>(f);
+}
+
+std::string
+ArdourTransport::bbt () const
+{
+	const samplepos_t t = session ().transport_sample ();
+	const Temporal::BBT_Time bbt_time = Temporal::TempoMap::fetch()->bbt_at (timepos_t (t));
+	std::ostringstream oss;
+	bbt_time.print_padded(oss);
+	return oss.str();
 }
 
 bool
@@ -58,7 +75,7 @@ ArdourTransport::set_roll (bool value)
 {
 	if ((value && !roll ()) || (!value && roll ())) {
 		// this call is equivalent to hitting the spacebar
-		basic_ui ().toggle_roll (false);
+		basic_ui ().toggle_roll (false, false);
 	}
 }
 

@@ -83,6 +83,18 @@ public:
 		return _current;
 	}
 
+	T operator- (T const other) const {
+		return _current - other;
+	}
+
+	bool operator< (T const &other) const {
+		return _current < other;
+	}
+
+	bool operator> (T const &other) const {
+		return _current > other;
+	}
+
 	bool operator==(const T& other) const {
 		return _current == other;
 	}
@@ -98,7 +110,6 @@ public:
 	T const& val () const {
 		return _current;
 	}
-
 
 	/* MANAGEMENT OF Stateful State */
 
@@ -155,7 +166,7 @@ public:
 
 	/* VARIOUS */
 
-	void apply_changes (PropertyBase const * p) {
+	void apply_change (PropertyBase const * p) {
 		T v = dynamic_cast<const PropertyTemplate<T>* > (p)->val ();
 		if (v != _current) {
 			set (v);
@@ -433,7 +444,7 @@ public:
 		}
 	}
 
-	void apply_changes (PropertyBase const * p) {
+	void apply_change (PropertyBase const * p) {
 		*_current = *(dynamic_cast<SharedStatefulProperty const *> (p))->val ();
 	}
 

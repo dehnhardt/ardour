@@ -28,7 +28,7 @@ using namespace ARDOUR;
 using namespace PBD;
 
 PolarityProcessor::PolarityProcessor (Session& s, boost::shared_ptr<PhaseControl> control)
-	: Processor(s, "Polarity")
+	: Processor(s, "Polarity", Temporal::AudioTime)
 	, _control (control)
 {
 }
@@ -57,15 +57,16 @@ void
 PolarityProcessor::run (BufferSet& bufs, samplepos_t /*start_sample*/, samplepos_t /*end_sample*/, double /*speed*/, pframes_t nframes, bool)
 {
 	size_t chn = 0;
+
 	assert (bufs.count().n_audio () <= _current_gain.size());
-	if (!_active && !_pending_active) {
+
+	if (!check_active()) {
 		/* fade all to unity */
 		for (BufferSet::audio_iterator i = bufs.audio_begin(); i != bufs.audio_end(); ++i, ++chn) {
 			_current_gain[chn] = Amp::apply_gain (*i, _session.nominal_sample_rate(), nframes, _current_gain[chn], 1.0);
 		}
 		return;
 	}
-	_active = _pending_active;
 
 	for (BufferSet::audio_iterator i = bufs.audio_begin(); i != bufs.audio_end(); ++i, ++chn) {
 		_current_gain[chn] = Amp::apply_gain (*i, _session.nominal_sample_rate(), nframes, _current_gain[chn], _control->inverted (chn) ? -1.f : 1.f);
@@ -73,7 +74,7 @@ PolarityProcessor::run (BufferSet& bufs, samplepos_t /*start_sample*/, samplepos
 }
 
 XMLNode&
-PolarityProcessor::state ()
+PolarityProcessor::state () const
 {
 	XMLNode& node (Processor::state ());
 	node.set_property("type", "polarity");

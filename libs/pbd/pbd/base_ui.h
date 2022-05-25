@@ -53,8 +53,7 @@ class LIBPBD_API BaseUI : public sigc::trackable, public PBD::EventLoop
 	BaseUI* base_instance() { return base_ui_instance; }
 
 	Glib::RefPtr<Glib::MainLoop> main_loop() const { return _main_loop; }
-        Glib::Threads::Thread* event_loop_thread() const { return run_loop_thread; }
-        bool caller_is_self () const { return Glib::Threads::Thread::self() == run_loop_thread; }
+	bool caller_is_self () const { return _run_loop_thread ? _run_loop_thread->caller_is_self () : true; }
 
 	bool ok() const { return _ok; }
 
@@ -80,7 +79,7 @@ class LIBPBD_API BaseUI : public sigc::trackable, public PBD::EventLoop
 
 	Glib::RefPtr<Glib::MainLoop> _main_loop;
 	Glib::RefPtr<Glib::MainContext> m_context;
-	Glib::Threads::Thread*       run_loop_thread;
+	PBD::Thread*                _run_loop_thread;
 	Glib::Threads::Mutex        _run_lock;
 	Glib::Threads::Cond         _running;
 
@@ -105,6 +104,8 @@ class LIBPBD_API BaseUI : public sigc::trackable, public PBD::EventLoop
 
 	void signal_new_request ();
 	void attach_request_source ();
+
+	virtual void maybe_install_precall_handler (Glib::RefPtr<Glib::MainContext>) {}
 
 	/** Derived UI objects must implement this method,
 	 * which will be called whenever there are requests

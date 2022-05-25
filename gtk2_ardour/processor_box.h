@@ -57,6 +57,9 @@
 #include "widgets/ardour_fader.h"
 #include "widgets/slider_controller.h"
 
+#ifdef HAVE_BEATBOX
+#include "beatbox_gui.h"
+#endif
 #include "plugin_interest.h"
 #include "plugin_display.h"
 #include "io_selector.h"
@@ -100,7 +103,7 @@ public:
 	void set_custom_ui_mode(bool use_custom) { want_custom = use_custom; }
 
 	int set_state (const XMLNode&, int);
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 
 private:
 	ProcessorBox* _processor_box;
@@ -149,13 +152,13 @@ public:
 	bool drag_data_get (Glib::RefPtr<Gdk::DragContext> const, Gtk::SelectionData &);
 	bool can_copy_state (Gtkmm2ext::DnDVBoxChild*) const;
 
-	enum Position {
+	enum ProcessorPosition {
 		PreFader,
 		Fader,
 		PostFader
 	};
 
-	void set_position (Position, uint32_t);
+	void set_position (ProcessorPosition, uint32_t);
 	bool unknown_processor () const { return _unknown_processor; } ;
 	boost::shared_ptr<ARDOUR::Processor> processor () const;
 	void set_enum_width (Width);
@@ -175,7 +178,7 @@ public:
 protected:
 	ArdourWidgets::ArdourButton _button;
 	Gtk::VBox _vbox;
-	Position _position;
+	ProcessorPosition _position;
 	uint32_t _position_num;
 	ProcessorBox* _parent;
 
@@ -435,7 +438,8 @@ public:
 
 	void hide_things ();
 
-	bool edit_aux_send(boost::shared_ptr<ARDOUR::Processor>);
+	bool edit_aux_send (boost::shared_ptr<ARDOUR::Processor>);
+	bool edit_triggerbox (boost::shared_ptr<ARDOUR::Processor>);
 
 	/* Everything except a WindowProxy object should use this to get the window */
 	Gtk::Window* get_processor_ui (boost::shared_ptr<ARDOUR::Processor>) const;

@@ -32,15 +32,15 @@
 #include "canvas/framed_curve.h"
 #include "canvas/text.h"
 
-namespace ARDOUR {
-	class TempoSection;
+namespace Temporal {
+	class TempoPoint;
 }
 class PublicEditor;
 
 class TempoCurve : public sigc::trackable
 {
 public:
-	TempoCurve (PublicEditor& editor, ArdourCanvas::Container &, guint32 rgba, ARDOUR::TempoSection& temp, samplepos_t sample, bool handle_events);
+	TempoCurve (PublicEditor& editor, ArdourCanvas::Item &, guint32 rgba, Temporal::TempoPoint const & temp, bool handle_events , ArdourCanvas::Distance marker_width);
 	~TempoCurve ();
 
 	static PBD::Signal1<void,TempoCurve*> CatchDeletion;
@@ -48,19 +48,15 @@ public:
 	static void setup_sizes (const double timebar_height);
 
 	ArdourCanvas::Item& the_item() const;
-	void canvas_height_set (double);
 
-	void set_position (samplepos_t lower, samplepos_t upper);
+	void set_duration (ARDOUR::samplecnt_t duration);
 	void set_color_rgba (uint32_t rgba);
-	samplepos_t position() const { return sample_position; }
-
-	ArdourCanvas::Container* get_parent() { return _parent; }
-	void reparent (ArdourCanvas::Container& parent);
 
 	void hide ();
 	void show ();
 
-	ARDOUR::TempoSection& tempo () const { return _tempo; }
+	Temporal::TempoPoint const & tempo () const { return *_tempo; }
+	void reset_point (Temporal::TempoPoint const &);
 
 	void set_max_tempo (const double& max) { _max_tempo = max; }
 	void set_min_tempo (const double& min) { _min_tempo = min; }
@@ -68,17 +64,14 @@ public:
 protected:
 	PublicEditor& editor;
 
-	ArdourCanvas::Container*   _parent;
+	ArdourCanvas::Item*        _parent;
 	ArdourCanvas::Container*    group;
-	ArdourCanvas::Points*       points;
+	ArdourCanvas::Points        points;
 	ArdourCanvas::FramedCurve* _curve;
 
-	double        unit_position;
-	samplepos_t   sample_position;
-	samplepos_t  _end_sample;
-	bool         _shown;
-	double       _canvas_height;
-	uint32_t     _color;
+	ARDOUR::samplecnt_t    _duration;
+	ArdourCanvas::Distance _marker_width;
+	uint32_t               _color;
 
 	void reposition ();
 
@@ -91,7 +84,7 @@ private:
 	double _min_tempo;
 	double _max_tempo;
 
-	ARDOUR::TempoSection& _tempo;
+	Temporal::TempoPoint const * _tempo;
 	ArdourCanvas::Text*   _start_text;
 	ArdourCanvas::Text*   _end_text;
 };

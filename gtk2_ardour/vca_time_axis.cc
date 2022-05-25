@@ -58,25 +58,25 @@ VCATimeAxisView::VCATimeAxisView (PublicEditor& ed, Session* s, ArdourCanvas::Ca
 	solo_button.set_name ("solo button");
 	set_tooltip (solo_button, _("Solo slaves"));
 	solo_button.signal_button_release_event().connect (sigc::mem_fun (*this, &VCATimeAxisView::solo_release), false);
-	solo_button.unset_flags (Gtk::CAN_FOCUS);
+	solo_button.set_can_focus (false);
 
 	mute_button.set_name ("mute button");
 	mute_button.set_text (S_("Mute|M"));
 	set_tooltip (mute_button, _("Mute slaves"));
 	mute_button.signal_button_release_event().connect (sigc::mem_fun (*this, &VCATimeAxisView::mute_release), false);
-	mute_button.unset_flags (Gtk::CAN_FOCUS);
+	mute_button.set_can_focus (false);
 
 	drop_button.set_name ("mute button");
 	drop_button.set_text (S_("VCA|D"));
 	set_tooltip (drop_button, _("Unassign all slaves"));
 	drop_button.signal_button_release_event().connect (sigc::mem_fun (*this, &VCATimeAxisView::drop_release), false);
-	drop_button.unset_flags (Gtk::CAN_FOCUS);
+	drop_button.set_can_focus (false);
 
 	automation_button.set_name ("route button");
 	automation_button.set_text (S_("RTAV|A"));
 	set_tooltip (automation_button, _("Automation"));
 	automation_button.signal_button_press_event().connect (sigc::mem_fun (*this, &VCATimeAxisView::automation_click), false);
-	automation_button.unset_flags (Gtk::CAN_FOCUS);
+	automation_button.set_can_focus (false);
 
 	mute_button.set_tweaks(ArdourButton::TrackHeader);
 	solo_button.set_tweaks(ArdourButton::TrackHeader);
@@ -303,7 +303,7 @@ VCATimeAxisView::update_track_number_visibility ()
 
 		// see ArdourButton::on_size_request(), we should probably use a global size-group here instead.
 		// except the width of the number label is subtracted from the name-hbox, so we
-		// need to explictly calculate it anyway until the name-label & entry become ArdourWidgets.
+		// need to explicitly calculate it anyway until the name-label & entry become ArdourWidgets.
 
 		int tnw = (2 + std::max(2u, _session->track_number_decimals())) * number_label.char_pixel_width();
 		if (tnw & 1) --tnw;
@@ -354,9 +354,10 @@ VCATimeAxisView::color () const
 }
 
 void
-VCATimeAxisView::set_height (uint32_t h, TrackHeightMode m)
+VCATimeAxisView::set_height (uint32_t h, TrackHeightMode m, bool from_idle)
 {
-	TimeAxisView::set_height (h, m);
+	TimeAxisView::set_height (h, m, from_idle);
+
 	if (height >= preset_height (HeightNormal)) {
 		drop_button.show ();
 		automation_button.show ();

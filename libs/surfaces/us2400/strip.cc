@@ -32,6 +32,8 @@
 #include "pbd/compose.h"
 #include "pbd/convert.h"
 
+#include "temporal/timeline.h"
+
 #include "ardour/amp.h"
 #include "ardour/bundle.h"
 #include "ardour/debug.h"
@@ -427,12 +429,12 @@ Strip::fader_touch_event (Button&, ButtonState bs)
 		boost::shared_ptr<AutomationControl> ac = _fader->control ();
 
 		_fader->set_in_use (true);
-		_fader->start_touch (_surface->mcp().transport_sample());
+		_fader->start_touch (timepos_t (_surface->mcp().transport_sample()));
 
 	} else {
 
 		_fader->set_in_use (false);
-		_fader->stop_touch (_surface->mcp().transport_sample());
+		_fader->stop_touch (timepos_t (_surface->mcp().transport_sample()));
 
 	}
 }
@@ -508,9 +510,9 @@ void
 Strip::handle_fader_touch (Fader& fader, bool touch_on)
 {
 	if (touch_on) {
-		fader.start_touch (_surface->mcp().transport_sample());
+		fader.start_touch (timepos_t (_surface->mcp().transport_sample()));
 	} else {
-		fader.stop_touch (_surface->mcp().transport_sample());
+		fader.stop_touch (timepos_t (_surface->mcp().transport_sample()));
 	}
 }
 
@@ -797,8 +799,9 @@ Strip::setup_trackview_vpot (boost::shared_ptr<Stripable> r)
 
 	_vpot->set_mode(Pot::wrap);
 
-#ifdef MIXBUS
 	const uint32_t global_pos = _surface->mcp().global_index (*this);
+
+#ifdef MIXBUS
 
 	//Trim & dynamics
 	switch (global_pos) {
@@ -917,11 +920,53 @@ Strip::setup_trackview_vpot (boost::shared_ptr<Stripable> r)
 		case 21:
 		case 22:
 		case 23:
-			pc = r->send_level_controllable ( global_pos - 16 );
+			pc = r->send_level_controllable ( global_pos - 16 + (_surface->mcp().get_sends_bank() * 8));
 			break;
 		}  //global_pos switch
 
 	} //if input_strip
+
+#else
+
+	switch (global_pos) {
+		// Track view equivalent
+		case 0:
+			pc = r->trim_control ();
+			_vpot->set_mode(Pot::boost_cut);
+			break;
+		case 1:
+			pc = r->monitoring_control ();
+			break;
+		case 2:
+			pc = r->solo_isolate_control ();
+			break;
+		case 3:
+			pc = r->solo_safe_control ();
+			break;
+		case 4:
+			pc = r->phase_control ();
+			break;
+		
+		// Sends
+		case 8:
+		case 9:
+		case 10:
+		case 11:
+		case 12:
+		case 13:
+		case 14:
+		case 15:
+		case 16:
+		case 17:
+		case 18:
+		case 19:
+		case 20:
+		case 21:
+		case 22:
+		case 23:
+			pc = r->send_level_controllable (global_pos - 8 + (_surface->mcp().get_sends_bank() * 16));
+			break;
+	}
 #endif //ifdef MIXBUS
 
 	if (pc) {  //control found; set our knob to watch for changes in it

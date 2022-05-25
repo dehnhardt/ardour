@@ -67,8 +67,8 @@ MidiStreamView::MidiStreamView (MidiTimeAxisView& tv)
 	, note_range_adjustment(0.0f, 0.0f, 0.0f)
 	, _range_dirty(false)
 	, _range_sum_cache(-1.0)
-	, _lowest_note(60)
-	, _highest_note(71)
+	, _lowest_note(UIConfiguration::instance().get_default_lower_midi_note())
+	, _highest_note(UIConfiguration::instance().get_default_upper_midi_note())
 	, _data_note_min(60)
 	, _data_note_max(71)
 	, _note_lines (0)
@@ -146,7 +146,7 @@ MidiStreamView::add_region_view_internal (boost::shared_ptr<Region> r, bool wait
 
 			(*i)->set_valid (true);
 
-			display_region(dynamic_cast<MidiRegionView*>(*i), wait_for_data);
+			display_region (dynamic_cast<MidiRegionView*>(*i), wait_for_data);
 
 			return 0;
 		}
@@ -159,12 +159,16 @@ MidiStreamView::add_region_view_internal (boost::shared_ptr<Region> r, bool wait
 
 	region_views.push_front (region_view);
 
-	/* display events and find note range */
-	display_region (region_view, wait_for_data);
+	{
+		RegionView::DisplaySuspender ds (*region_view, false);
 
-	/* fit note range if we are importing */
-	if (_trackview.session()->operation_in_progress (Operations::insert_file)) {
-		set_note_range (ContentsRange);
+		display_region (region_view, wait_for_data);
+
+		/* fit note range if we are importing */
+		if (_trackview.session()->operation_in_progress (Operations::insert_file)) {
+			/* this will call display_region() */
+			set_note_range (ContentsRange);
+		}
 	}
 
 	/* catch regionview going away */
@@ -177,24 +181,21 @@ MidiStreamView::add_region_view_internal (boost::shared_ptr<Region> r, bool wait
 }
 
 void
-MidiStreamView::display_region(MidiRegionView* region_view, bool load_model)
+MidiStreamView::display_region (MidiRegionView* region_view, bool)
 {
 	if (!region_view) {
 		return;
 	}
 
-	region_view->enable_display (true);
+	RegionView::DisplaySuspender ds (*region_view, false);
+
 	region_view->set_height (child_height());
 
-	boost::shared_ptr<MidiSource> source(region_view->midi_region()->midi_source(0));
+	boost::shared_ptr<MidiSource> source (region_view->midi_region()->midi_source(0));
+
 	if (!source) {
 		error << _("attempt to display MIDI region with no source") << endmsg;
 		return;
-	}
-
-	if (load_model) {
-		Glib::Threads::Mutex::Lock lm(source->mutex());
-		source->load_model(lm);
 	}
 
 	if (!source->model()) {
@@ -202,12 +203,10 @@ MidiStreamView::display_region(MidiRegionView* region_view, bool load_model)
 		return;
 	}
 
-	_range_dirty = update_data_note_range(
-		source->model()->lowest_note(),
-		source->model()->highest_note());
+	_range_dirty = update_data_note_range (source->model()->lowest_note(), source->model()->highest_note());
 
 	// Display region contents
-	region_view->display_model(source->model());
+	region_view->display_model (source->model());
 }
 
 
@@ -225,12 +224,10 @@ void
 MidiStreamView::update_contents_metrics(boost::shared_ptr<Region> r)
 {
 	boost::shared_ptr<MidiRegion> mr = boost::dynamic_pointer_cast<MidiRegion>(r);
+
 	if (mr) {
-		Glib::Threads::Mutex::Lock lm(mr->midi_source(0)->mutex());
-		mr->midi_source(0)->load_model(lm);
-		_range_dirty = update_data_note_range(
-			mr->model()->lowest_note(),
-			mr->model()->highest_note());
+		Source::ReaderLock lm (mr->midi_source(0)->mutex());
+		_range_dirty = update_data_note_range (mr->model()->lowest_note(), mr->model()->highest_note());
 	}
 }
 
@@ -283,23 +280,23 @@ MidiStreamView::redisplay_track ()
 		_data_note_max = 71;
 	}
 
+	vector<RegionView::DisplaySuspender> vds;
+
 	// Flag region views as invalid and disable drawing
 	for (i = region_views.begin(); i != region_views.end(); ++i) {
-		(*i)->set_valid(false);
-		(*i)->enable_display(false);
+		(*i)->set_valid (false);
+		vds.push_back (RegionView::DisplaySuspender (**i, false));
 	}
 
 	// Add and display region views, and flag them as valid
-	_trackview.track()->playlist()->foreach_region(
-		sigc::hide_return (sigc::mem_fun (*this, &StreamView::add_region_view)));
+	_trackview.track()->playlist()->foreach_region (sigc::hide_return (sigc::mem_fun (*this, &StreamView::add_region_view)));
 
 	// Stack regions by layer, and remove invalid regions
 	layer_regions();
 
 	// Update note range (not regions which are correct) and draw note lines
-	apply_note_range(_lowest_note, _highest_note, false);
+	apply_note_range (_lowest_note, _highest_note, false);
 }
-
 
 void
 MidiStreamView::update_contents_height ()
@@ -342,7 +339,7 @@ MidiStreamView::draw_note_lines()
 		 */
 
 		if (i <= highest_note()) {
-			_note_lines->add (y, 1.0, UIConfiguration::instance().color ("piano roll black outline"));
+			_note_lines->add_coord (y, 1.0, UIConfiguration::instance().color ("piano roll black outline"));
 		}
 
 		/* now add a thicker line/bar which covers the entire vertical
@@ -366,7 +363,7 @@ MidiStreamView::draw_note_lines()
 		double mid = y + (h/2.0);
 
 		if (mid >= 0 && h > 1.0) {
-			_note_lines->add (mid, h, color);
+			_note_lines->add_coord (mid, h, color);
 		}
 
 		prev_y = y;
@@ -393,7 +390,10 @@ MidiStreamView::apply_note_range(uint8_t lowest, uint8_t highest, bool to_region
 	_highest_note = highest;
 	_lowest_note = lowest;
 
-	int const max_note_height = 20;  // This should probably be based on text size...
+	float uiscale = UIConfiguration::instance().get_ui_scale();
+	uiscale = expf (uiscale) / expf (1.f);
+
+	int const max_note_height = std::max<int> (20, 20 * uiscale);
 	int const range = _highest_note - _lowest_note;
 	int const pixels_per_note = floor (child_height () / range);
 
@@ -421,8 +421,8 @@ MidiStreamView::apply_note_range(uint8_t lowest, uint8_t highest, bool to_region
 		}
 	}
 
-	note_range_adjustment.set_page_size(_highest_note - _lowest_note);
-	note_range_adjustment.set_value(_lowest_note);
+	note_range_adjustment.set_page_size (_highest_note - _lowest_note);
+	note_range_adjustment.set_value (_lowest_note);
 
 	draw_note_lines();
 
@@ -474,10 +474,10 @@ MidiStreamView::setup_rec_box ()
 
 				// handle multi
 
-				samplepos_t start = 0;
+				timepos_t start;
 				if (rec_regions.size() > 0) {
 					start = rec_regions.back().first->start()
-					        + _trackview.track()->get_captured_samples (rec_regions.size() - 1);
+						+ timepos_t (_trackview.track()->get_captured_samples (rec_regions.size() - 1));
 				}
 
 				if (!rec_regions.empty()) {
@@ -488,27 +488,26 @@ MidiStreamView::setup_rec_box ()
 				PropertyList plist;
 
 				plist.add (ARDOUR::Properties::start, start);
-				plist.add (ARDOUR::Properties::length, 1);
-				/* Just above we're setting this nascent region's length to 1.  I think this
-				   is so that the RegionView gets created with a non-zero width, as apparently
-				   creating a RegionView with a zero width causes it never to be displayed
-				   (there is a warning in TimeAxisViewItem::init about this).  However, we
-				   must also set length_beats to something non-zero, otherwise the sample length
-				   of 1 causes length_beats to be set to some small quantity << 1.  Then
-				   when the position is set up below, this length_beats is used to recompute
-				   length using BeatsSamplesConverter::to, which is slightly innacurate for small
-				   beats values because it converts floating point beats to bars, beats and
-				   integer ticks.  The upshot of which being that length gets set back to 0,
-				   meaning no region view is ever seen, meaning no MIDI notes during record (#3820).
+				plist.add (ARDOUR::Properties::length, timepos_t (Temporal::Beats::ticks (1)));
+				/* Just above we're setting this nascent region's length to 1 tick.  I think this is so
+				   that the RegionView gets created with a non-zero width, as apparently creating a
+				   RegionView with a zero width causes it never to be displayed (there is a warning in
+				   TimeAxisViewItem::init about this). We don't want to use 1 sample since that results
+				   in zero length musical time duration.
 				*/
-				plist.add (ARDOUR::Properties::length_beats, 1);
 				plist.add (ARDOUR::Properties::name, string());
 				plist.add (ARDOUR::Properties::layer, 0);
 
 				boost::shared_ptr<MidiRegion> region (boost::dynamic_pointer_cast<MidiRegion>
 				                                      (RegionFactory::create (sources, plist, false)));
 				if (region) {
-					region->set_position (_trackview.track()->current_capture_start ());
+
+					/* MIDI regions should likely not be positioned using audio time, but this is
+					 * just a rec-region, so we don't really care
+					 */
+
+					region->set_start (timepos_t (_trackview.track()->current_capture_start() - _trackview.track()->get_capture_start_sample (0)));
+					region->set_position (timepos_t (_trackview.track()->current_capture_start ()));
 
 					RegionView* rv = add_region_view_internal (region, false, true);
 					MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (rv);
@@ -628,7 +627,7 @@ MidiStreamView::update_rec_box ()
 
 	/* Update the region being recorded to reflect where we currently are */
 	boost::shared_ptr<ARDOUR::Region> region = rec_regions.back().first;
-	region->set_length (_trackview.track()->current_capture_end () - _trackview.track()->current_capture_start(), 0);
+	region->set_length (timecnt_t (_trackview.track()->current_capture_end () - _trackview.track()->current_capture_start()));
 
 	MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (rec_regions.back().second);
 	mrv->extend_active_notes ();
@@ -680,7 +679,7 @@ struct RegionPositionSorter {
 };
 
 bool
-MidiStreamView::paste (ARDOUR::samplepos_t pos, const Selection& selection, PasteContext& ctx, const int32_t sub_num)
+MidiStreamView::paste (timepos_t const & pos, const Selection& selection, PasteContext& ctx)
 {
 	/* Paste into the first region which starts on or before pos.  Only called when
 	   using an internal editing tool. */
@@ -708,7 +707,7 @@ MidiStreamView::paste (ARDOUR::samplepos_t pos, const Selection& selection, Past
 	}
 
 	MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (*prev);
-	return mrv ? mrv->paste(pos, selection, ctx, sub_num) : false;
+	return mrv ? mrv->paste(pos, selection, ctx) : false;
 }
 
 void

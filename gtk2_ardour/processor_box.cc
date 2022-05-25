@@ -56,6 +56,9 @@
 #include "ardour/amp.h"
 #include "ardour/audio_track.h"
 #include "ardour/audioengine.h"
+#ifdef HAVE_BEATBOX
+#include "ardour/beatbox.h"
+#endif
 #include "ardour/internal_return.h"
 #include "ardour/internal_send.h"
 #include "ardour/luaproc.h"
@@ -95,6 +98,7 @@
 #include "script_selector.h"
 #include "send_ui.h"
 #include "timers.h"
+#include "triggerbox_ui.h"
 #include "new_plugin_preset_dialog.h"
 
 #include "pbd/i18n.h"
@@ -334,7 +338,7 @@ ProcessorEntry::can_copy_state (Gtkmm2ext::DnDVBoxChild* o) const
 bool
 ProcessorEntry::drag_data_get (Glib::RefPtr<Gdk::DragContext> const, Gtk::SelectionData &data)
 {
-	if (data.get_target() == "PluginPresetPtr") {
+	if (data.get_target() == "x-ardour/plugin.preset") {
 		boost::shared_ptr<PluginInsert> pi = boost::dynamic_pointer_cast<PluginInsert> (_processor);
 
 		if (!_plugin_preset_pointer || !pi) {
@@ -388,7 +392,7 @@ ProcessorEntry::drag_data_get (Glib::RefPtr<Gdk::DragContext> const, Gtk::Select
 }
 
 void
-ProcessorEntry::set_position (Position p, uint32_t num)
+ProcessorEntry::set_position (ProcessorPosition p, uint32_t num)
 {
 	_position = p;
 	_position_num = num;
@@ -732,7 +736,7 @@ ProcessorEntry::add_control_state (XMLNode* node) const
 	if (_plugin_display) {
 		XMLNode* c = new XMLNode (X_("Object"));
 		c->set_property (X_("id"), X_("InlineDisplay"));
-		c->set_property (X_("visible"), _plugin_display->is_visible ());
+		c->set_property (X_("visible"), _plugin_display->get_visible ());
 		node->add_child_nocopy (*c);
 	}
 }
@@ -789,7 +793,7 @@ ProcessorEntry::build_controls_menu ()
 	if (_plugin_display) {
 		items.push_back (CheckMenuElem (_("Inline Display")));
 		Gtk::CheckMenuItem* c = dynamic_cast<Gtk::CheckMenuItem*> (&items.back ());
-		c->set_active (_plugin_display->is_visible ());
+		c->set_active (_plugin_display->get_visible ());
 		c->signal_toggled().connect (sigc::mem_fun (*this, &ProcessorEntry::toggle_inline_display_visibility));
 	}
 
@@ -822,7 +826,7 @@ ProcessorEntry::build_controls_menu ()
 void
 ProcessorEntry::toggle_inline_display_visibility ()
 {
-	if (_plugin_display->is_visible ()) {
+	if (_plugin_display->get_visible ()) {
 		_plugin_display->hide();
 	} else {
 		_plugin_display->show();
@@ -997,7 +1001,7 @@ ProcessorEntry::Control::start_touch ()
 	if (!c) {
 		return;
 	}
-	c->start_touch (c->session().transport_sample());
+	c->start_touch (timepos_t (c->session().transport_sample()));
 }
 
 void
@@ -1007,7 +1011,7 @@ ProcessorEntry::Control::end_touch ()
 	if (!c) {
 		return;
 	}
-	c->stop_touch (c->session().transport_sample());
+	c->stop_touch (timepos_t (c->session().transport_sample()));
 }
 
 bool
@@ -1732,7 +1736,7 @@ ProcessorEntry::PluginInlineDisplay::update_height_alloc (uint32_t inline_height
 	Gtk::ScrolledWindow* sw = dynamic_cast<Gtk::ScrolledWindow*> (pr);
 	if (sw) {
 		const Gtk::VScrollbar* vsb = sw->get_vscrollbar();
-		sc = vsb && vsb->is_visible();
+		sc = vsb && vsb->get_visible();
 	}
 
 	if (shm != _cur_height) {
@@ -1797,24 +1801,24 @@ ProcessorEntry::LuaPluginDisplay::render_inline (cairo_t *cr, uint32_t width)
 static std::list<Gtk::TargetEntry> drop_targets()
 {
 	std::list<Gtk::TargetEntry> tmp;
-	tmp.push_back (Gtk::TargetEntry ("processor")); // from processor-box to processor-box
-	tmp.push_back (Gtk::TargetEntry ("PluginInfoPtr")); // from plugin-manager
-	tmp.push_back (Gtk::TargetEntry ("PluginFavoritePtr")); // from sidebar
+	tmp.push_back (Gtk::TargetEntry ("x-ardour/processor", Gtk::TARGET_SAME_APP)); // from processor-box to processor-box
+	tmp.push_back (Gtk::TargetEntry ("x-ardour/plugin.info", Gtk::TARGET_SAME_APP)); // from plugin-manager
+	tmp.push_back (Gtk::TargetEntry ("x-ardour/plugin.favorite", Gtk::TARGET_SAME_APP)); // from sidebar
 	return tmp;
 }
 
 static std::list<Gtk::TargetEntry> drag_targets()
 {
 	std::list<Gtk::TargetEntry> tmp;
-	tmp.push_back (Gtk::TargetEntry ("PluginPresetPtr")); // to sidebar (optional preset)
-	tmp.push_back (Gtk::TargetEntry ("processor")); // to processor-box (copy)
+	tmp.push_back (Gtk::TargetEntry ("x-ardour/processor", Gtk::TARGET_SAME_APP)); // to processor-box (copy)
+	tmp.push_back (Gtk::TargetEntry ("x-ardour/plugin.preset", Gtk::TARGET_SAME_APP)); // to sidebar (optional preset)
 	return tmp;
 }
 
 static std::list<Gtk::TargetEntry> drag_targets_noplugin()
 {
 	std::list<Gtk::TargetEntry> tmp;
-	tmp.push_back (Gtk::TargetEntry ("processor")); // to processor box (sends, faders re-order)
+	tmp.push_back (Gtk::TargetEntry ("x-ardour/processor", Gtk::TARGET_SAME_APP)); // to processor box (sends, faders re-order)
 	return tmp;
 }
 
@@ -1846,7 +1850,7 @@ ProcessorBox::ProcessorBox (ARDOUR::Session* sess, boost::function<PluginSelecto
 	processor_scroller.add (processor_display);
 	pack_start (processor_scroller, true, true);
 
-	processor_display.set_flags (CAN_FOCUS);
+	processor_display.set_can_focus ();
 	processor_display.set_name ("ProcessorList");
 	processor_display.set_data ("processorbox", this);
 	processor_display.set_size_request (48, -1);
@@ -1880,7 +1884,7 @@ ProcessorBox::~ProcessorBox ()
 	 * pointer to a widget owned by the UI Manager, and has potentially
 	 * be returned to many other ProcessorBoxes. GTK doesn't really make
 	 * clear the ownership of this widget, which is a menu and thus is
-	 * never packed into any container other than an implict GtkWindow.
+	 * never packed into any container other than an implicit GtkWindow.
 	 *
 	 * For now, until or if we ever get clarification over the ownership
 	 * story just let it continue to exist. At worst, its a small memory leak.
@@ -1966,7 +1970,7 @@ ProcessorBox::_drop_plugin_preset (Gtk::SelectionData const &data, Route::Proces
 				p->load_preset (ppp->_preset);
 			}
 
-			boost::shared_ptr<Processor> processor (new PluginInsert (*_session, p));
+			boost::shared_ptr<Processor> processor (new PluginInsert (*_session, _route->time_domain(), p));
 			if (Config->get_new_plugins_active ()) {
 				processor->enable (true);
 			}
@@ -1989,7 +1993,7 @@ ProcessorBox::_drop_plugin (Gtk::SelectionData const &data, Route::ProcessorList
 			if (!p) {
 				continue;
 			}
-			boost::shared_ptr<Processor> processor (new PluginInsert (*_session, p));
+			boost::shared_ptr<Processor> processor (new PluginInsert (*_session, _route->time_domain(), p));
 			if (Config->get_new_plugins_active ()) {
 				processor->enable (true);
 			}
@@ -2007,10 +2011,10 @@ ProcessorBox::plugin_drop (Gtk::SelectionData const &data, ProcessorEntry* posit
 	boost::shared_ptr<Processor> p = find_drop_position (position);
 	Route::ProcessorList pl;
 
-	if (data.get_target() == "PluginInfoPtr") {
+	if (data.get_target() == "x-ardour/plugin.info") {
 		_drop_plugin (data, pl);
 	}
-	else if (data.get_target() == "PluginFavoritePtr") {
+	else if (data.get_target() == "x-ardour/plugin.favorite") {
 		_drop_plugin_preset (data, pl);
 	}
 	else {
@@ -2418,7 +2422,7 @@ ProcessorBox::leave_notify (GdkEventCrossing* ev)
 
 	Widget* top = get_toplevel();
 
-	if (top->is_toplevel()) {
+	if (top->get_is_toplevel()) {
 		Window* win = dynamic_cast<Window*> (top);
 		gtk_window_set_focus (win->gobj(), 0);
 	}
@@ -2649,7 +2653,7 @@ ProcessorBox::use_plugins (const SelectedPlugins& plugins)
 {
 	for (SelectedPlugins::const_iterator p = plugins.begin(); p != plugins.end(); ++p) {
 
-		boost::shared_ptr<Processor> processor (new PluginInsert (*_session, *p));
+		boost::shared_ptr<Processor> processor (new PluginInsert (*_session, _route->time_domain(), *p));
 
 		Route::ProcessorStreams err_streams;
 
@@ -2923,21 +2927,25 @@ ProcessorBox::maybe_add_processor_to_ui_list (boost::weak_ptr<Processor> w)
 
 	if (boost::dynamic_pointer_cast<PluginInsert> (p)) {
 		have_ui = true;
-	}
-	else if (boost::dynamic_pointer_cast<PortInsert> (p)) {
+	} else if (boost::dynamic_pointer_cast<PortInsert> (p)) {
 		have_ui = true;
-	}
-	else if (boost::dynamic_pointer_cast<Send> (p)) {
+	} else if (boost::dynamic_pointer_cast<Send> (p)) {
 		if (!boost::dynamic_pointer_cast<InternalSend> (p)) {
 			have_ui = true;
 		}
-	}
-	else if (boost::dynamic_pointer_cast<Return> (p)) {
+	} else if (boost::dynamic_pointer_cast<Return> (p)) {
 		if (!boost::dynamic_pointer_cast<InternalReturn> (p)) {
 			have_ui = true;
 		}
+	} else if (boost::dynamic_pointer_cast<TriggerBox> (p)) {
+		have_ui = true;
 	}
-
+#ifdef HAVE_BEATBOX
+	else if (boost::dynamic_pointer_cast<BeatBox> (p)) {
+		cerr << "Have UI for beatbox\n";
+		have_ui = true;
+	}
+#endif
 	if (!have_ui) {
 		return;
 	}
@@ -3006,10 +3014,19 @@ ProcessorBox::add_processor_to_display (boost::weak_ptr<Processor> p)
 
 	boost::shared_ptr<Send> send = boost::dynamic_pointer_cast<Send> (processor);
 	boost::shared_ptr<PortInsert> ext = boost::dynamic_pointer_cast<PortInsert> (processor);
+	boost::shared_ptr<TriggerBox> tb = boost::dynamic_pointer_cast<TriggerBox> (processor);
+#ifdef HAVE_BEATBOX
+	boost::shared_ptr<BeatBox> bb = boost::dynamic_pointer_cast<BeatBox> (processor);
+#endif
 	boost::shared_ptr<UnknownProcessor> stub = boost::dynamic_pointer_cast<UnknownProcessor> (processor);
 
 	//faders and meters are not deletable, copy/paste-able, so they shouldn't be selectable
-	if (!send && !plugin_insert && !ext && !stub) {
+
+#ifdef HAVE_BEATBOX
+	if (!send && !plugin_insert && !ext && !stub && !bb && !tb) {
+#else
+	if (!send && !plugin_insert && !ext && !stub && !tb) {
+#endif
 		e->set_selectable(false);
 	}
 
@@ -3590,11 +3607,13 @@ ProcessorBox::paste_processor_state (const XMLNodeList& nlist, boost::shared_ptr
 				}
 
 				p.reset (pi);
+			} else if (type->value() == "beatbox") {
+				/* XXX do something */
 			} else {
 				/* XXX its a bit limiting to assume that everything else
 				   is a plugin.
 				*/
-				p.reset (new PluginInsert (*_session));
+				p.reset (new PluginInsert (*_session, _route->time_domain()));
 				/* we can't use RAII Stateful::ForceIDRegeneration
 				 * because that'd void copying the state and wrongly bump
 				 * the state-version counter.
@@ -3754,11 +3773,14 @@ ProcessorBox::processor_can_be_edited (boost::shared_ptr<Processor> processor)
 		return false;
 	}
 
-	if (
-		boost::dynamic_pointer_cast<Send> (processor) ||
-		boost::dynamic_pointer_cast<Return> (processor) ||
-		boost::dynamic_pointer_cast<PluginInsert> (processor) ||
-		boost::dynamic_pointer_cast<PortInsert> (processor)
+	if (boost::dynamic_pointer_cast<Send> (processor) ||
+	    boost::dynamic_pointer_cast<Return> (processor) ||
+	    boost::dynamic_pointer_cast<PluginInsert> (processor) ||
+	    boost::dynamic_pointer_cast<PortInsert> (processor) ||
+	    boost::dynamic_pointer_cast<TriggerBox> (processor)
+#ifdef HAVE_BEATBOX
+	    || boost::dynamic_pointer_cast<BeatBox> (processor)
+#endif
 		) {
 		return true;
 	}
@@ -3786,6 +3808,10 @@ ProcessorBox::get_editor_window (boost::shared_ptr<Processor> processor, bool us
 	boost::shared_ptr<Return> retrn;
 	boost::shared_ptr<PluginInsert> plugin_insert;
 	boost::shared_ptr<PortInsert> port_insert;
+
+#ifdef HAVE_BEATBOX
+	boost::shared_ptr<BeatBox> beatbox;
+#endif
 	Window* gidget = 0;
 
 	/* This method may or may not return a Window, but if it does not it
@@ -3890,6 +3916,22 @@ ProcessorBox::get_editor_window (boost::shared_ptr<Processor> processor, bool us
 		}
 
 		gidget = io_selector;
+
+#ifdef HAVE_BEATBOX
+	} else if ((beatbox = boost::dynamic_pointer_cast<BeatBox> (processor)) != 0) {
+
+		Window* w = get_processor_ui (beatbox);
+		BBGUI* bbg = 0;
+
+		if (!w) {
+			bbg = new BBGUI (beatbox);
+			set_processor_ui (beatbox, bbg);
+		} else {
+			bbg = dynamic_cast<BBGUI*> (w);
+		}
+
+		gidget = bbg;
+#endif
 	}
 
 	return gidget;
@@ -4249,6 +4291,20 @@ ProcessorBox::edit_aux_send (boost::shared_ptr<Processor> processor)
 	return true;
 }
 
+bool
+ProcessorBox::edit_triggerbox (boost::shared_ptr<Processor> processor)
+{
+	boost::shared_ptr<TriggerBox> tb;
+
+	if ((tb = boost::dynamic_pointer_cast<TriggerBox> (processor)) == 0) {
+		return false;
+	}
+
+	UIConfiguration::instance().set_show_triggers_inline (!UIConfiguration::instance().get_show_triggers_inline());
+
+	return true;
+}
+
 void
 ProcessorBox::edit_processor (boost::shared_ptr<Processor> processor)
 {
@@ -4256,6 +4312,9 @@ ProcessorBox::edit_processor (boost::shared_ptr<Processor> processor)
 		return;
 	}
 	if (edit_aux_send (processor)) {
+		return;
+	}
+	if (edit_triggerbox (processor)) {
 		return;
 	}
 	if (!ARDOUR_UI_UTILS::engine_is_running ()) {
@@ -4529,7 +4588,7 @@ ProcessorWindowProxy::session_handle()
 }
 
 XMLNode&
-ProcessorWindowProxy::get_state ()
+ProcessorWindowProxy::get_state () const
 {
 	XMLNode *node;
 	node = &ProxyBase::get_state();

@@ -347,9 +347,21 @@ void
 EntryOption::filter_text (const Glib::ustring&, int*)
 {
 	std::string text = _entry->get_text ();
+
+	if (!_valid.empty()) {
+		for (std::string::const_iterator t = text.begin(); t != text.end(); ) {
+			if (_valid.find_first_of (*t) == std::string::npos) {
+				t = text.erase (t);
+			} else {
+				++t;
+			}
+		}
+	}
+
 	for (size_t i = 0; i < _invalid.length(); ++i) {
 		text.erase (std::remove(text.begin(), text.end(), _invalid.at(i)), text.end());
 	}
+
 	if (text != _entry->get_text ()) {
 		_entry->set_text (text);
 	}
@@ -469,15 +481,15 @@ ComboStringOption::add_to_page (OptionEditorPage* p)
  */
 void
 ComboStringOption::set_popdown_strings (const std::vector<std::string>& strings) {
-	_combo->clear_items ();
+	_combo->remove_all ();
 	for (std::vector<std::string>::const_iterator i = strings.begin(); i != strings.end(); ++i) {
-		_combo->append_text (*i);
+		_combo->append (*i);
 	}
 }
 
 void
 ComboStringOption::clear () {
-	_combo->clear_items();
+	_combo->remove_all();
 }
 
 void
@@ -513,9 +525,9 @@ BoolComboOption::BoolComboOption (
 	_combo = manage (new ComboBoxText);
 
 	/* option 0 is the false option */
-	_combo->append_text (f);
+	_combo->append (f);
 	/* and option 1 is the true */
-	_combo->append_text (t);
+	_combo->append (t);
 
 	_combo->signal_changed().connect (sigc::mem_fun (*this, &BoolComboOption::changed));
 }
@@ -643,20 +655,20 @@ ClockOption::set_state_from_config ()
 	Timecode::Time TC;
 	samplepos_t when;
 	if (!Timecode::parse_timecode_format(_get(), TC)) {
-		_clock.set (0, true);
+		_clock.set (timepos_t (0), true);
 	}
 	TC.rate = _session->samples_per_timecode_frame();
 	TC.drop = _session->timecode_drop_frames();
 	_session->timecode_to_sample(TC, when, false, false);
 	if (TC.negative) { when=-when; }
-	_clock.set (when, true);
+	_clock.set (timepos_t (when), true);
 }
 
 void
 ClockOption::save_clock_time ()
 {
 	Timecode::Time TC;
-	_session->sample_to_timecode(_clock.current_time(), TC, false, false);
+	_session->sample_to_timecode (_clock.current_time().samples(), TC, false, false);
 	_set (Timecode::timecode_format_time(TC));
 }
 
@@ -916,13 +928,15 @@ DirectoryOption::DirectoryOption (string const & i, string const & n, sigc::slot
 {
 	Gtkmm2ext::add_volume_shortcuts (_file_chooser);
 	_file_chooser.set_action (Gtk::FILE_CHOOSER_ACTION_SELECT_FOLDER);
-	_file_chooser.signal_selection_changed().connect (sigc::mem_fun (*this, &DirectoryOption::selection_changed));
+	_changed_connection = _file_chooser.signal_selection_changed().connect (sigc::mem_fun (*this, &DirectoryOption::selection_changed));
 }
 
 void
 DirectoryOption::set_state_from_config ()
 {
-	_file_chooser.set_current_folder (poor_mans_glob(_get ()));
+	_changed_connection.block ();
+	_file_chooser.set_filename (poor_mans_glob(_get ()));
+	_changed_connection.unblock ();
 }
 
 void

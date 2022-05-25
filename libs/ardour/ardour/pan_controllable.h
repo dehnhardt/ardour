@@ -37,11 +37,11 @@ class Pannable;
 class LIBARDOUR_API PanControllable : public AutomationControl
 {
   public:
-	PanControllable (Session& s, std::string name, Pannable* o, Evoral::Parameter param)
+	PanControllable (Session& s, std::string name, Pannable* o, Evoral::Parameter param, Temporal::TimeDomain td)
 		: AutomationControl (s,
 		                     param,
 		                     ParameterDescriptor(param),
-		                     boost::shared_ptr<AutomationList>(new AutomationList(param)),
+		                     boost::shared_ptr<AutomationList>(new AutomationList(param, td)),
 		                     name)
 		, owner (o)
 	{}

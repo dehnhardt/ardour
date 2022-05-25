@@ -87,6 +87,7 @@
 #include "route_group_menu.h"
 #include "meter_patterns.h"
 #include "ui_config.h"
+#include "triggerbox_ui.h"
 
 #include "pbd/i18n.h"
 
@@ -111,6 +112,7 @@ MixerStrip::MixerStrip (Mixer_UI& mx, Session* sess, bool in_mixer)
 	, processor_box (sess, boost::bind (&MixerStrip::plugin_selector, this), mx.selection(), this, in_mixer)
 	, gpm (sess, 250)
 	, panners (sess)
+	, trigger_display (-1., default_triggers_per_box*16.)
 	, button_size_group (Gtk::SizeGroup::create (Gtk::SIZE_GROUP_HORIZONTAL))
 	, rec_mon_table (2, 2)
 	, solo_iso_table (1, 2)
@@ -120,8 +122,7 @@ MixerStrip::MixerStrip (Mixer_UI& mx, Session* sess, bool in_mixer)
 	, input_button (true)
 	, output_button (false)
 	, monitor_section_button (0)
-	, midi_input_enable_button (0)
-	, _plugin_insert_cnt (0)
+	, _tmaster_widget (-1, 16)
 	, _comment_button (_("Comments"))
 	, trim_control (ArdourKnob::default_elements, ArdourKnob::Flags (ArdourKnob::Detent | ArdourKnob::ArcToZero))
 	, _master_volume_menu (0)
@@ -149,6 +150,7 @@ MixerStrip::MixerStrip (Mixer_UI& mx, Session* sess, boost::shared_ptr<Route> rt
 	, processor_box (sess, boost::bind (&MixerStrip::plugin_selector, this), mx.selection(), this, in_mixer)
 	, gpm (sess, 250)
 	, panners (sess)
+	, trigger_display (-1., 8*16.)
 	, button_size_group (Gtk::SizeGroup::create (Gtk::SIZE_GROUP_HORIZONTAL))
 	, rec_mon_table (2, 2)
 	, solo_iso_table (1, 2)
@@ -158,8 +160,7 @@ MixerStrip::MixerStrip (Mixer_UI& mx, Session* sess, boost::shared_ptr<Route> rt
 	, input_button (true)
 	, output_button (false)
 	, monitor_section_button (0)
-	, midi_input_enable_button (0)
-	, _plugin_insert_cnt (0)
+	, _tmaster_widget (-1, 16)
 	, _comment_button (_("Comments"))
 	, trim_control (ArdourKnob::default_elements, ArdourKnob::Flags (ArdourKnob::Detent | ArdourKnob::ArcToZero))
 	, _master_volume_menu (0)
@@ -179,6 +180,8 @@ MixerStrip::init ()
 	group_menu = 0;
 	route_ops_menu = 0;
 	_width_owner = 0;
+
+	_tmaster = new TriggerMaster (_tmaster_widget.root ());
 
 	/* the length of this string determines the width of the mixer strip when it is set to `wide' */
 	longest_label = "longest label";
@@ -321,6 +324,8 @@ MixerStrip::init ()
 	global_vpacker.pack_start (name_button, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (input_button_box, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (invert_button_box, Gtk::PACK_SHRINK);
+	global_vpacker.pack_start (trigger_display, Gtk::PACK_SHRINK);
+	global_vpacker.pack_start (_tmaster_widget, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (processor_box, true, true);
 	global_vpacker.pack_start (panners, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (rec_mon_table, Gtk::PACK_SHRINK);
@@ -386,7 +391,7 @@ MixerStrip::init ()
 		    Gdk::KEY_PRESS_MASK|
 		    Gdk::KEY_RELEASE_MASK);
 
-	set_flags (get_flags() | Gtk::CAN_FOCUS);
+	set_can_focus ();
 
 	/* Add the widgets under visibility control to the VisibilityGroup; the names used here
 	   must be the same as those used in RCOptionEditor so that the configuration changes
@@ -399,6 +404,8 @@ MixerStrip::init ()
 	_visibility.add (&output_button, X_("Output"), _("Output"), false);
 	_visibility.add (&_comment_button, X_("Comments"), _("Comments"), false);
 	_visibility.add (&control_slave_ui, X_("VCA"), _("VCA Assigns"), false);
+	_visibility.add (&trigger_display, X_("TriggerGrid"), _("Trigger Grid"), false);
+	_visibility.add (&_tmaster_widget, X_("TriggerMaster"), _("Trigger Master"), false);
 
 	parameter_changed (X_("mixer-element-visibility"));
 	UIConfiguration::instance().ParameterChanged.connect (sigc::mem_fun (*this, &MixerStrip::parameter_changed));
@@ -421,6 +428,7 @@ MixerStrip::~MixerStrip ()
 	}
 
 	delete _master_volume_menu;
+	delete route_ops_menu;
 }
 
 void
@@ -498,7 +506,7 @@ MixerStrip::trim_start_touch ()
 {
 	assert (_route && _session);
 	if (route()->trim() && route()->trim()->active() && route()->n_inputs().n_audio() > 0) {
-		route()->trim()->gain_control ()->start_touch (_session->transport_sample());
+		route()->trim()->gain_control ()->start_touch (timepos_t (_session->transport_sample()));
 	}
 }
 
@@ -507,7 +515,7 @@ MixerStrip::trim_end_touch ()
 {
 	assert (_route && _session);
 	if (route()->trim() && route()->trim()->active() && route()->n_inputs().n_audio() > 0) {
-		route()->trim()->gain_control ()->stop_touch (_session->transport_sample());
+		route()->trim()->gain_control ()->stop_touch (timepos_t (_session->transport_sample()));
 	}
 }
 
@@ -534,6 +542,8 @@ MixerStrip::set_route (boost::shared_ptr<Route> rt)
 	}
 
 	RouteUI::set_route (rt);
+
+	set_trigger_display (rt->triggerbox());
 
 	control_slave_ui.set_stripable (boost::dynamic_pointer_cast<Stripable> (rt));
 
@@ -583,7 +593,7 @@ MixerStrip::set_route (boost::shared_ptr<Route> rt)
 			monitor_changed ();
 			monitor_section_button->set_related_action (act);
 			set_tooltip (monitor_section_button, _("Show/Hide Monitoring Section"));
-			monitor_section_button->unset_flags (Gtk::CAN_FOCUS);
+			monitor_section_button->set_can_focus (false);
 			monitor_section_added_or_removed ();
 		}
 	} else {
@@ -626,9 +636,11 @@ MixerStrip::set_route (boost::shared_ptr<Route> rt)
 	hide_master_spacer (false);
 
 	if (is_track()) {
+		_tmaster_widget.show ();
 		monitor_input_button->show ();
 		monitor_disk_button->show ();
 	} else {
+		_tmaster_widget.hide ();
 		monitor_input_button->hide();
 		monitor_disk_button->hide ();
 	}
@@ -636,27 +648,24 @@ MixerStrip::set_route (boost::shared_ptr<Route> rt)
 	update_trim_control();
 
 	if (is_midi_track()) {
-		if (midi_input_enable_button == 0) {
-			midi_input_enable_button = manage (new ArdourButton);
-			midi_input_enable_button->set_name ("midi input button");
-			midi_input_enable_button->set_elements ((ArdourButton::Element)(ArdourButton::Edge|ArdourButton::Body|ArdourButton::VectorIcon));
-			midi_input_enable_button->set_icon (ArdourIcon::DinMidi);
-			midi_input_enable_button->signal_button_press_event().connect (sigc::mem_fun (*this, &MixerStrip::input_active_button_press), false);
-			midi_input_enable_button->signal_button_release_event().connect (sigc::mem_fun (*this, &MixerStrip::input_active_button_release), false);
-			set_tooltip (midi_input_enable_button, _("Enable/Disable MIDI input"));
-		} else {
-			input_button_box.remove (*midi_input_enable_button);
-		}
+
+		midi_input_enable_button.set_size_request (PX_SCALE(19), PX_SCALE(19));
+		midi_input_enable_button.set_name ("midi input button");
+		midi_input_enable_button.set_elements ((ArdourButton::Element)(ArdourButton::Edge|ArdourButton::Body|ArdourButton::VectorIcon));
+		midi_input_enable_button.set_icon (ArdourIcon::DinMidi);
+		midi_input_enable_button.signal_button_press_event().connect (sigc::mem_fun (*this, &MixerStrip::input_active_button_press), false);
+		midi_input_enable_button.signal_button_release_event().connect (sigc::mem_fun (*this, &MixerStrip::input_active_button_release), false);
+		set_tooltip (midi_input_enable_button, _("Enable/Disable MIDI input"));
+		input_button_box.pack_start (midi_input_enable_button, false, false);
+
 		/* get current state */
 		midi_input_status_changed ();
-		input_button_box.pack_start (*midi_input_enable_button, false, false);
+
 		/* follow changes */
 		midi_track()->InputActiveChanged.connect (route_connections, invalidator (*this), boost::bind (&MixerStrip::midi_input_status_changed, this), gui_context());
 	} else {
-		if (midi_input_enable_button) {
-			/* removal from the container will delete it */
-			input_button_box.remove (*midi_input_enable_button);
-			midi_input_enable_button = 0;
+		if (midi_input_enable_button.get_parent()) {
+			input_button_box.remove (midi_input_enable_button);
 		}
 	}
 
@@ -862,7 +871,6 @@ void
 MixerStrip::set_packed (bool yn)
 {
 	_packed = yn;
-	set_gui_property ("visible", _packed);
 }
 
 void
@@ -897,6 +905,7 @@ MixerStrip::connect_to_pan ()
 void
 MixerStrip::update_panner_choices ()
 {
+	/* code-dup TriggerStrip::update_panner_choices */
 	ENSURE_GUI_THREAD (*this, &MixerStrip::update_panner_choices)
 	if (!_route->panner_shell()) { return; }
 
@@ -1043,24 +1052,6 @@ MixerStrip::show_passthru_color ()
 	reset_strip_style ();
 }
 
-
-void
-MixerStrip::help_count_plugins (boost::weak_ptr<Processor> p)
-{
-	boost::shared_ptr<Processor> processor (p.lock ());
-	if (!processor || !processor->display_to_user()) {
-		return;
-	}
-	boost::shared_ptr<PluginInsert> pi = boost::dynamic_pointer_cast<PluginInsert> (processor);
-#ifdef MIXBUS
-	if (pi && pi->is_channelstrip ()) {
-		return;
-	}
-#endif
-	if (pi) {
-		++_plugin_insert_cnt;
-	}
-}
 void
 MixerStrip::build_route_ops_menu ()
 {
@@ -1139,9 +1130,9 @@ MixerStrip::build_route_ops_menu ()
 		items.push_back (SeparatorElem());
 	}
 
-	_plugin_insert_cnt = 0;
-	_route->foreach_processor (sigc::mem_fun (*this, &MixerStrip::help_count_plugins));
-	if (active && _plugin_insert_cnt > 0) {
+	uint32_t plugin_insert_cnt = 0;
+	_route->foreach_processor (boost::bind (RouteUI::help_count_plugins, _1, & plugin_insert_cnt));
+	if (active && plugin_insert_cnt > 0) {
 		items.push_back (MenuElem (_("Pin Connections..."), sigc::mem_fun (*this, &RouteUI::manage_pins)));
 	}
 
@@ -1171,6 +1162,13 @@ MixerStrip::build_route_ops_menu ()
 		if (!selection.selected (stav)) {
 			selection.set (stav);
 		}
+
+#ifdef MIXBUS
+		if (_route->mixbus()) {
+			/* no dup, no remove */
+			return;
+		}
+#endif
 
 		if (!_route->is_master()) {
 			items.push_back (SeparatorElem());
@@ -1641,6 +1639,8 @@ MixerStrip::revert_to_default_display ()
 	}
 
 	reset_strip_style ();
+
+	set_trigger_display (_route->triggerbox());
 }
 
 void
@@ -1760,11 +1760,9 @@ MixerStrip::input_active_button_release (GdkEventButton* ev)
 void
 MixerStrip::midi_input_status_changed ()
 {
-	if (midi_input_enable_button) {
-		boost::shared_ptr<MidiTrack> mt = midi_track ();
-		assert (mt);
-		midi_input_enable_button->set_active (mt->input_active ());
-	}
+	boost::shared_ptr<MidiTrack> mt = midi_track ();
+	assert (mt);
+	midi_input_enable_button.set_active (mt->input_active ());
 }
 
 string
@@ -1792,6 +1790,8 @@ MixerStrip::parameter_changed (string p)
 				master_volume_table.hide ();
 			}
 		}
+	} else if (p == "show-triggers-inline") {
+		/* XXX do something or get rid of this parameter */
 	}
 }
 
@@ -1869,10 +1869,7 @@ MixerStrip::update_sensitivity ()
 	_comment_button.set_sensitive (en && !send);
 	trim_control.set_sensitive (en && !send);
 	control_slave_ui.set_sensitive (en && !send);
-
-	if (midi_input_enable_button) {
-		midi_input_enable_button->set_sensitive (en && !send);
-	}
+	midi_input_enable_button.set_sensitive (en && !send);
 
 	output_button.set_sensitive (en && !aux);
 
@@ -2059,7 +2056,7 @@ MixerStrip::update_track_number_visibility ()
 		number_label.show ();
 		// see ArdourButton::on_size_request(), we should probably use a global size-group here instead.
 		// except the width of the number label is subtracted from the name-hbox, so we
-		// need to explictly calculate it anyway until the name-label & entry become ArdourWidgets.
+		// need to explicitly calculate it anyway until the name-label & entry become ArdourWidgets.
 		int tnw = (2 + std::max(2u, _session->track_number_decimals())) * number_label.char_pixel_width();
 		if (tnw & 1) --tnw;
 		number_label.set_size_request(tnw, -1);
@@ -2096,3 +2093,11 @@ MixerStrip::hide_master_spacer (bool yn)
 		spacer.hide();
 	}
 }
+
+void
+MixerStrip::set_trigger_display (boost::shared_ptr<TriggerBox> tb)
+{
+	_tmaster->set_triggerbox (tb);
+	trigger_display.set_triggerbox (tb.get());
+}
+

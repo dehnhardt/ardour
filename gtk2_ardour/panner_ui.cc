@@ -79,7 +79,7 @@ PannerUI::PannerUI (Session* s)
 
 	//set_size_request_to_display_given_text (pan_automation_state_button, X_("O"), 2, 2);
 
-	pan_automation_state_button.unset_flags (Gtk::CAN_FOCUS);
+	pan_automation_state_button.set_can_focus (false);
 
 	pan_automation_state_button.signal_button_press_event().connect (sigc::mem_fun(*this, &PannerUI::pan_automation_state_button_event), false);
 
@@ -352,7 +352,7 @@ PannerUI::start_touch (boost::weak_ptr<AutomationControl> wac)
 	if (!ac) {
 		return;
 	}
-	ac->start_touch (ac->session().transport_sample());
+	ac->start_touch (timepos_t (ac->session().transport_sample()));
 }
 
 void
@@ -362,7 +362,7 @@ PannerUI::stop_touch (boost::weak_ptr<AutomationControl> wac)
 	if (!ac) {
 		return;
 	}
-	ac->stop_touch (ac->session().transport_sample());
+	ac->stop_touch (timepos_t (ac->session().transport_sample()));
 }
 
 bool

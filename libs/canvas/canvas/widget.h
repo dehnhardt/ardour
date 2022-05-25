@@ -24,7 +24,7 @@
 #include "canvas/visibility.h"
 #include "canvas/item.h"
 
-#include "gtkmm2ext/cairo_widget.h"
+class CairoWidget; /* should really be in Gtkmm2ext namespace */
 
 namespace ArdourCanvas
 {
@@ -38,7 +38,7 @@ public:
 	void render (Rect const &, Cairo::RefPtr<Cairo::Context>) const;
 	void compute_bounding_box () const;
 
-	void size_allocate (Rect const &);
+	void _size_allocate (Rect const &);
 
 	CairoWidget const & get () const {
 		return _widget;

@@ -50,6 +50,7 @@ using namespace ARDOUR_PLUGIN_UTILS;
 PluginManagerUI::PluginManagerUI ()
 	: ArdourWindow (_("Plugin Manager"))
 	, _btn_reindex (_("Update Index Only"))
+	, _btn_discover (_("Discover New/Updated"))
 	, _btn_rescan_all (_("Re-scan All"))
 	, _btn_rescan_err (_("Re-scan Faulty"))
 	, _btn_rescan_sel (_("Re-scan Selected"))
@@ -107,12 +108,12 @@ PluginManagerUI::PluginManagerUI ()
 		const char*   tooltip;
 	} ci[] = {
 		/* clang-format off */
-		{ALIGN_LEFT,   false,  _("Status"),       _("Plugin Scan Result") },
+		{ALIGN_START,   false,  _("Status"),       _("Plugin Scan Result") },
 		{ALIGN_CENTER, false, S_("Ignore|Ign"),   _("Ignore this plugin (and others that are loaded in the same file)") },
 		{ALIGN_CENTER, false, S_("Favorite|Fav"), _("Add this plugin to the favorite list") },
 		{ALIGN_CENTER, false,  _("Hide"),         _("Hide this plugin in the plugin-selector") },
 		{ALIGN_CENTER, false,  _("Type"),         _("Plugin standard") },
-		{ALIGN_LEFT,   true,   _("File/ID"),      _("The plugin file (VST) or unique ID (AU, LV2)") },
+		{ALIGN_START,   true,   _("File/ID"),      _("The plugin file (VST) or unique ID (AU, LV2)") },
 		{ALIGN_CENTER, true,   _("Name"),         _("Name of the plugin") },
 		{ALIGN_CENTER, true,   _("Creator"),      _("The plugin's vendor") },
 		{ALIGN_CENTER, true,   _("Tags"),         _("Meta data: category and tags") },
@@ -183,11 +184,12 @@ PluginManagerUI::PluginManagerUI ()
 	_tbl_nfo.set_col_spacings (3);
 	_tbl_nfo.set_row_spacing (0, 3);
 
-	b_actions->pack_start (_btn_clear);
+	b_actions->pack_start (_btn_discover);
+	b_actions->pack_start (_btn_reindex);
 	b_actions->pack_start (_btn_rescan_sel);
 	b_actions->pack_start (_btn_rescan_err);
 	b_actions->pack_start (_btn_rescan_all);
-	b_actions->pack_start (_btn_reindex);
+	b_actions->pack_start (_btn_clear);
 	b_actions->set_spacing (4);
 	b_actions->set_border_width (4);
 
@@ -256,6 +258,7 @@ PluginManagerUI::PluginManagerUI ()
 	/* tooltips */
 	/* clang-format off */
 	ArdourWidgets::set_tooltip (_btn_reindex,    _("Only update plugin index, do not discover new plugins."));
+	ArdourWidgets::set_tooltip (_btn_discover,   _("Update Index and scan newly installed or updated plugins."));
 	ArdourWidgets::set_tooltip (_btn_rescan_all, _("Scans all plugins, regardless if they have already been successfully scanned.\nDepending on the number of plugins installed this can take a long time."));
 	ArdourWidgets::set_tooltip (_btn_rescan_err, _("Scans plugins that have not yet been successfully scanned."));
 	ArdourWidgets::set_tooltip (_btn_rescan_sel, _("Scans the selected plugin."));
@@ -293,6 +296,7 @@ PluginManagerUI::PluginManagerUI ()
 	PluginManager::instance ().PluginStatusChanged.connect (_manager_connections, invalidator (*this), boost::bind (&PluginManagerUI::plugin_status_changed, this, _1, _2, _3), gui_context ());
 
 	_btn_reindex.signal_clicked.connect (sigc::mem_fun (*this, &PluginManagerUI::reindex));
+	_btn_discover.signal_clicked.connect (sigc::mem_fun (*this, &PluginManagerUI::discover));
 	_btn_rescan_all.signal_clicked.connect (sigc::mem_fun (*this, &PluginManagerUI::rescan_all));
 	_btn_rescan_err.signal_clicked.connect (sigc::mem_fun (*this, &PluginManagerUI::rescan_faulty));
 	_btn_rescan_sel.signal_clicked.connect (sigc::mem_fun (*this, &PluginManagerUI::rescan_selected));
@@ -601,38 +605,38 @@ PluginManagerUI::refill ()
 		pc_max.ndscn = std::max (pc_max.ndscn, i->second.ndscn);
 	}
 
-	Label* head_type  = new Label (_("Type"), ALIGN_LEFT, ALIGN_CENTER);
-	Label* head_count = new Label (_("Total"), ALIGN_RIGHT, ALIGN_CENTER);
+	Label* head_type  = new Label (_("Type"), ALIGN_START, ALIGN_CENTER);
+	Label* head_count = new Label (_("Total"), ALIGN_END, ALIGN_CENTER);
 	_tbl_nfo.attach (*head_type,  0, 1, row, row + 1, SHRINK | FILL, SHRINK, 2, 2);
 	_tbl_nfo.attach (*head_count, 1, 2, row, row + 1, SHRINK | FILL, SHRINK, 2, 2);
 	if (pc_max.error > 0) {
-		Label* hd = new Label (_("Err"), ALIGN_RIGHT, ALIGN_CENTER);
+		Label* hd = new Label (_("Err"), ALIGN_END, ALIGN_CENTER);
 		_tbl_nfo.attach (*hd, 2, 3, row, row + 1, SHRINK | FILL, SHRINK, 2, 2);
 	}
 	if (pc_max.stale > 0) {
-		Label* hd = new Label (_("Mis"), ALIGN_RIGHT, ALIGN_CENTER);
+		Label* hd = new Label (_("Mis"), ALIGN_END, ALIGN_CENTER);
 		_tbl_nfo.attach (*hd, 3, 4, row, row + 1, SHRINK | FILL, SHRINK, 2, 2);
 	}
 	if (pc_max.ndscn > 0) {
-		Label* hd = new Label (_("New"), ALIGN_RIGHT, ALIGN_CENTER);
+		Label* hd = new Label (_("New"), ALIGN_END, ALIGN_CENTER);
 		_tbl_nfo.attach (*hd, 4, 5, row, row + 1, SHRINK | FILL, SHRINK, 2, 2);
 	}
 	++row;
 	for (std::map<PluginType, PluginCount>::const_iterator i = plugin_count.begin (); i != plugin_count.end (); ++i, ++row) {
-		Label* lbl_type  = new Label (plugin_type (i->first), ALIGN_LEFT, ALIGN_CENTER);
-		Label* lbl_count = new Label (string_compose ("%1", i->second.total), ALIGN_RIGHT, ALIGN_CENTER);
+		Label* lbl_type  = new Label (plugin_type (i->first), ALIGN_START, ALIGN_CENTER);
+		Label* lbl_count = new Label (string_compose ("%1", i->second.total), ALIGN_END, ALIGN_CENTER);
 		_tbl_nfo.attach (*lbl_type,  0, 1, row, row + 1, EXPAND | FILL, SHRINK, 2, 2);
 		_tbl_nfo.attach (*lbl_count, 1, 2, row, row + 1, SHRINK | FILL, SHRINK, 2, 2);
 		if (pc_max.error > 0) {
-			Label* lbl = new Label (string_compose ("%1", i->second.error), ALIGN_RIGHT, ALIGN_CENTER);
+			Label* lbl = new Label (string_compose ("%1", i->second.error), ALIGN_END, ALIGN_CENTER);
 			_tbl_nfo.attach (*lbl, 2, 3, row, row + 1, SHRINK | FILL, SHRINK, 2, 2);
 		}
 		if (pc_max.stale > 0) {
-			Label* lbl = new Label (string_compose ("%1", i->second.stale), ALIGN_RIGHT, ALIGN_CENTER);
+			Label* lbl = new Label (string_compose ("%1", i->second.stale), ALIGN_END, ALIGN_CENTER);
 			_tbl_nfo.attach (*lbl, 3, 4, row, row + 1, SHRINK | FILL, SHRINK, 2, 2);
 		}
 		if (pc_max.ndscn > 0) {
-			Label* lbl = new Label (string_compose ("%1", i->second.ndscn), ALIGN_RIGHT, ALIGN_CENTER);
+			Label* lbl = new Label (string_compose ("%1", i->second.ndscn), ALIGN_END, ALIGN_CENTER);
 			_tbl_nfo.attach (*lbl, 4, 5, row, row + 1, SHRINK | FILL, SHRINK, 2, 2);
 		}
 	}
@@ -812,6 +816,13 @@ void
 PluginManagerUI::reindex()
 {
 	PluginScanDialog psd (true, true, this);
+	psd.start ();
+}
+
+void
+PluginManagerUI::discover()
+{
+	PluginScanDialog psd (false, true, this);
 	psd.start ();
 }
 

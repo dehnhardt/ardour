@@ -53,7 +53,6 @@ void
 Container::compute_bounding_box () const
 {
 	_bounding_box = Rect ();
-	add_child_bounding_boxes ();
-	_bounding_box_dirty = false;
+	/* nothing to do here; Item::bounding_box() will add all children for us */
+	set_bbox_clean ();
 }
-

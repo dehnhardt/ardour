@@ -18,6 +18,7 @@
 
 #include <cstring>
 
+#include "pbd/g_atomic_compat.h"
 #include "pbd/pthread_utils.h"
 
 #include "ardour/audioengine.h"
@@ -32,6 +33,9 @@ using namespace ARDOUR;
 RTTaskList::RTTaskList ()
 	: _task_run_sem ("rt_task_run", 0)
 	, _task_end_sem ("rt_task_done", 0)
+	, _n_tasks (0)
+	, _m_tasks (0)
+	, _tasks (256)
 {
 	g_atomic_int_set (&_threads_active, 0);
 	reset_thread_list ();
@@ -45,15 +49,14 @@ RTTaskList::~RTTaskList ()
 void
 RTTaskList::drop_threads ()
 {
-	Glib::Threads::Mutex::Lock pm (_process_mutex);
 	g_atomic_int_set (&_threads_active, 0);
 
 	uint32_t nt = _threads.size ();
 	for (uint32_t i = 0; i < nt; ++i) {
 		_task_run_sem.signal ();
 	}
-	for (std::vector<pthread_t>::const_iterator i = _threads.begin (); i != _threads.end (); ++i) {
-		pthread_join (*i, NULL);
+	for (auto const& i : _threads) {
+		pthread_join (i, NULL);
 	}
 	_threads.clear ();
 	_task_run_sem.reset ();
@@ -61,10 +64,14 @@ RTTaskList::drop_threads ()
 }
 
 /*static*/ void*
-RTTaskList::_thread_run (void *arg)
+RTTaskList::_thread_run (void* arg)
 {
-	RTTaskList *d = static_cast<RTTaskList *>(arg);
-	pthread_set_name ("RTTaskList");
+	RTTaskList* d = static_cast<RTTaskList*> (arg);
+
+	char name[64];
+	snprintf (name, 64, "RTTask-%p", (void*)DEBUG_THREAD_SELF);
+	pthread_set_name (name);
+
 	d->run ();
 	pthread_exit (0);
 	return 0;
@@ -80,20 +87,18 @@ RTTaskList::reset_thread_list ()
 		return;
 	}
 
-	Glib::Threads::Mutex::Lock pm (_process_mutex);
-
 	g_atomic_int_set (&_threads_active, 1);
 	for (uint32_t i = 0; i < num_threads; ++i) {
+		int       rv = 1;
 		pthread_t thread_id;
-		int rv = 1;
-		if (AudioEngine::instance()->is_realtime ()) {
-			rv = pbd_realtime_pthread_create (PBD_SCHED_FIFO, AudioEngine::instance()->client_real_time_priority(), PBD_RT_STACKSIZE_HELP, &thread_id, _thread_run, this);
+		if (AudioEngine::instance ()->is_realtime ()) {
+			rv = pbd_realtime_pthread_create (PBD_SCHED_FIFO, AudioEngine::instance ()->client_real_time_priority (), PBD_RT_STACKSIZE_HELP, &thread_id, _thread_run, this);
 		}
 		if (rv) {
 			rv = pbd_pthread_create (PBD_RT_STACKSIZE_HELP, &thread_id, _thread_run, this);
 		}
 		if (rv) {
-			PBD::fatal << _("Cannot create thread for TaskList!") << " (" << strerror(rv) << ")" << endmsg;
+			PBD::fatal << _("Cannot create thread for TaskList!") << " (" << strerror (rv) << ")" << endmsg;
 			/* NOT REACHED */
 		}
 		pbd_mach_set_realtime_policy (thread_id, 5. * 1e-5, false);
@@ -104,7 +109,6 @@ RTTaskList::reset_thread_list ()
 void
 RTTaskList::run ()
 {
-	Glib::Threads::Mutex::Lock tm (_tasklist_mutex, Glib::Threads::NOT_LOCK);
 	bool wait = true;
 
 	while (true) {
@@ -120,14 +124,7 @@ RTTaskList::run ()
 		wait = false;
 
 		boost::function<void ()> to_run;
-		tm.acquire ();
-		if (!_tasklist.empty ()) {
-			to_run = _tasklist.front();
-			_tasklist.pop_front ();
-		}
-		tm.release ();
-
-		if (!to_run.empty ()) {
+		if (_tasks.pop_front (to_run)) {
 			to_run ();
 			continue;
 		}
@@ -141,34 +138,31 @@ RTTaskList::run ()
 }
 
 void
-RTTaskList::process (TaskList const& tl)
+RTTaskList::push_back (boost::function<void ()> fn)
 {
-	Glib::Threads::Mutex::Lock pm (_process_mutex);
-	Glib::Threads::Mutex::Lock tm (_tasklist_mutex, Glib::Threads::NOT_LOCK);
-
-	tm.acquire ();
-	_tasklist = tl;
-	tm.release ();
-
-	process_tasklist ();
-
-	tm.acquire ();
-	_tasklist.clear ();
-	tm.release ();
+	if (!_tasks.push_back (fn)) {
+		fn ();
+	} else {
+		++_n_tasks;
+	}
+	++_m_tasks;
 }
 
 void
-RTTaskList::process_tasklist ()
+RTTaskList::process ()
 {
-//	if (0 == g_atomic_int_get (&_threads_active) || _threads.size () == 0) {
-
-		for (TaskList::iterator i = _tasklist.begin (); i != _tasklist.end(); ++i) {
-			(*i)();
+	if (0 == g_atomic_int_get (&_threads_active) || _threads.size () == 0) {
+		boost::function<void ()> to_run;
+		while (_tasks.pop_front (to_run)) {
+			to_run ();
+			--_n_tasks;
 		}
+		assert (_n_tasks == 0);
+		_n_tasks = 0;
 		return;
-//	}
+	}
 
-	uint32_t nt = std::min (_threads.size (), _tasklist.size ());
+	uint32_t nt = std::min (_threads.size (), _n_tasks);
 
 	for (uint32_t i = 0; i < nt; ++i) {
 		_task_run_sem.signal ();
@@ -176,4 +170,11 @@ RTTaskList::process_tasklist ()
 	for (uint32_t i = 0; i < nt; ++i) {
 		_task_end_sem.wait ();
 	}
+
+	/* re-allocate queue if needed */
+	if (_tasks.capacity () < _m_tasks) {
+		_tasks.reserve (_m_tasks);
+	}
+	_n_tasks = 0;
+	_m_tasks = 0;
 }

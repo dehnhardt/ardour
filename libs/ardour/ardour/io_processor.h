@@ -49,7 +49,7 @@ public:
 	             ARDOUR::DataType default_type = DataType::AUDIO, bool sendish=false);
 
 	IOProcessor (Session&, boost::shared_ptr<IO> input, boost::shared_ptr<IO> output,
-	             const std::string& proc_name, bool sendish=false);
+	             const std::string& proc_name, Temporal::TimeDomain, bool sendish=false);
 
 	virtual ~IOProcessor ();
 
@@ -76,7 +76,7 @@ public:
 	PBD::Signal2<void,IOProcessor*,bool>     AutomationPlaybackChanged;
 	PBD::Signal2<void,IOProcessor*,uint32_t> AutomationChanged;
 
-	XMLNode& state ();
+	XMLNode& state () const;
 	int set_state (const XMLNode&, int version);
 
 	static void prepare_for_reset (XMLNode& state, const std::string& name);

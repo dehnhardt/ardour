@@ -22,12 +22,16 @@
  */
 
 #include <cstdio>
+#include <fstream>
+
 #include <errno.h>
 
 #include "pbd/gstdio_compat.h"
 #include <glibmm/miscutils.h>
 
 #include "pbd/error.h"
+
+#include "temporal/timeline.h"
 
 #include "ardour/amp.h"
 #include "ardour/automatable.h"
@@ -55,9 +59,11 @@ bool Automatable::skip_saving_automation = false;
 
 const string Automatable::xml_node_name = X_("Automation");
 
-Automatable::Automatable(Session& session)
-	: _a_session(session)
-	, _automated_controls (new ControlList)
+Automatable::Automatable(Session& session, Temporal::TimeDomain td)
+	: ControlSet ()
+	, _a_session(session)
+	, _automated_controls (new ControlList ())
+	, _time_domain (td)
 {
 }
 
@@ -116,9 +122,9 @@ Automatable::load_automation (const string& path)
 		fullpath += path;
 	}
 
-	FILE * in = g_fopen (fullpath.c_str (), "rb");
+	std::ifstream in (fullpath);
 
-	if (!in) {
+	if (in.bad()) {
 		warning << string_compose(_("cannot open %2 to load automation data (%3)")
 				, fullpath, strerror (errno)) << endmsg;
 		return 1;
@@ -128,17 +134,14 @@ Automatable::load_automation (const string& path)
 	set<Evoral::Parameter> tosave;
 	controls().clear ();
 
-	while (!feof(in)) {
-		double when;
+	while (!in.eof()) {
+		Temporal::timepos_t when;
 		double value;
 		uint32_t port;
 
-		if (3 != fscanf (in, "%d %lf %lf", &port, &when, &value)) {
-			if (feof(in)) {
-				break;
-			}
-			goto bad;
-		}
+		in >> port;  if (in.bad()) { goto bad; }
+		in >> when;  if (in.bad()) { goto bad; }
+		in >> value; if (in.bad()) { goto bad; }
 
 		Evoral::Parameter param(PluginAutomation, 0, port);
 		/* FIXME: this is legacy and only used for plugin inserts?  I think? */
@@ -146,14 +149,12 @@ Automatable::load_automation (const string& path)
 		c->list()->add (when, value);
 		tosave.insert (param);
 	}
-	::fclose (in);
 
 	return 0;
 
 bad:
 	error << string_compose(_("cannot load automation data from %2"), fullpath) << endmsg;
 	controls().clear ();
-	::fclose (in);
 	return -1;
 }
 
@@ -307,7 +308,7 @@ Automatable::set_automation_xml_state (const XMLNode& node, Evoral::Parameter le
 }
 
 XMLNode&
-Automatable::get_automation_xml_state ()
+Automatable::get_automation_xml_state () const
 {
 	Glib::Threads::Mutex::Lock lm (control_lock());
 	XMLNode* node = new XMLNode (Automatable::xml_node_name);
@@ -316,7 +317,7 @@ Automatable::get_automation_xml_state ()
 		return *node;
 	}
 
-	for (Controls::iterator li = controls().begin(); li != controls().end(); ++li) {
+	for (Controls::const_iterator li = controls().begin(); li != controls().end(); ++li) {
 		boost::shared_ptr<AutomationList> l = boost::dynamic_pointer_cast<AutomationList>(li->second->list());
 		if (l) {
 			node->add_child_nocopy (l->get_state ());
@@ -404,23 +405,23 @@ Automatable::non_realtime_locate (samplepos_t now)
 			 * compare to compare to non_realtime_transport_stop()
 			 */
 				const bool list_did_write = !l->in_new_write_pass ();
-				c->stop_touch (-1); // time is irrelevant
-				l->stop_touch (-1);
+				c->stop_touch (timepos_t::zero (time_domain())); // time is irrelevant
+				l->stop_touch (timepos_t::zero (time_domain()));
 				c->commit_transaction (list_did_write);
-				l->write_pass_finished (now, Config->get_automation_thinning_factor ());
+				l->write_pass_finished (timepos_t (now), Config->get_automation_thinning_factor ());
 
 				if (l->automation_state () == Write) {
 					l->set_automation_state (Touch);
 				}
 				if (l->automation_playback ()) {
-					c->set_value_unchecked (c->list ()->eval (now));
+					c->set_value_unchecked (c->list ()->eval (timepos_t (now)));
 				}
 			}
 
-			l->start_write_pass (now);
+			l->start_write_pass (timepos_t (now));
 
 			if (rolling && am_touching) {
-				c->start_touch (now);
+				c->start_touch (timepos_t (now));
 			}
 		}
 	}
@@ -450,19 +451,19 @@ Automatable::non_realtime_transport_stop (samplepos_t now, bool /*flush_processo
 		*/
 		const bool list_did_write = !l->in_new_write_pass ();
 
-		c->stop_touch (now);
-		l->stop_touch (now);
+		c->stop_touch (timepos_t (now));
+		l->stop_touch (timepos_t (now));
 
 		c->commit_transaction (list_did_write);
 
-		l->write_pass_finished (now, Config->get_automation_thinning_factor ());
+		l->write_pass_finished (timepos_t (now), Config->get_automation_thinning_factor ());
 
 		if (l->automation_state () == Write) {
 			l->set_automation_state (Touch);
 		}
 
 		if (l->automation_playback ()) {
-			c->set_value_unchecked (c->list ()->eval (now));
+			c->set_value_unchecked (c->list ()->eval (timepos_t (now)));
 		}
 	}
 }
@@ -547,7 +548,7 @@ Automatable::control_factory(const Evoral::Parameter& param)
 				if (!Variant::type_is_numeric(desc.datatype)) {
 					make_list = false;  // Can't automate non-numeric data yet
 				} else {
-					list = boost::shared_ptr<AutomationList>(new AutomationList(param, desc));
+					list = boost::shared_ptr<AutomationList>(new AutomationList(param, desc, Temporal::AudioTime));
 				}
 				control = new PluginInsert::PluginPropertyControl(pi, param, desc, list);
 			}
@@ -565,35 +566,35 @@ Automatable::control_factory(const Evoral::Parameter& param)
 	} else if (param.type() == PanAzimuthAutomation || param.type() == PanWidthAutomation || param.type() == PanElevationAutomation) {
 		Pannable* pannable = dynamic_cast<Pannable*>(this);
 		if (pannable) {
-			control = new PanControllable (_a_session, describe_parameter (param), pannable, param);
+			control = new PanControllable (_a_session, describe_parameter (param), pannable, param, time_domain());
 		} else {
 			warning << "PanAutomation for non-Pannable" << endl;
 		}
 	} else if (param.type() == RecEnableAutomation) {
 		Recordable* re = dynamic_cast<Recordable*> (this);
 		if (re) {
-			control = new RecordEnableControl (_a_session, X_("recenable"), *re);
+			control = new RecordEnableControl (_a_session, X_("recenable"), *re, time_domain());
 		}
 	} else if (param.type() == MonitoringAutomation) {
 		Monitorable* m = dynamic_cast<Monitorable*>(this);
 		if (m) {
-			control = new MonitorControl (_a_session, X_("monitor"), *m);
+			control = new MonitorControl (_a_session, X_("monitor"), *m, time_domain());
 		}
 	} else if (param.type() == SoloAutomation) {
 		Soloable* s = dynamic_cast<Soloable*>(this);
 		Muteable* m = dynamic_cast<Muteable*>(this);
 		if (s && m) {
-			control = new SoloControl (_a_session, X_("solo"), *s, *m);
+			control = new SoloControl (_a_session, X_("solo"), *s, *m, time_domain());
 		}
 	} else if (param.type() == MuteAutomation) {
 		Muteable* m = dynamic_cast<Muteable*>(this);
 		if (m) {
-			control = new MuteControl (_a_session, X_("mute"), *m);
+			control = new MuteControl (_a_session, X_("mute"), *m, time_domain());
 		}
 	}
 
 	if (make_list && !list) {
-		list = boost::shared_ptr<AutomationList>(new AutomationList(param, desc));
+		list = boost::shared_ptr<AutomationList>(new AutomationList(param, desc, time_domain()));
 	}
 
 	if (!control) {
@@ -638,9 +639,9 @@ Automatable::clear_controls ()
 }
 
 bool
-Automatable::find_next_event (double start, double end, Evoral::ControlEvent& next_event, bool only_active) const
+Automatable::find_next_event (timepos_t const & start, timepos_t const & end, Evoral::ControlEvent& next_event, bool only_active) const
 {
-	next_event.when = start <= end ? std::numeric_limits<double>::max() : 0;
+	next_event.when = start <= end ? timepos_t::max (start.time_domain()) : timepos_t (start.time_domain());
 
 	if (only_active) {
 		boost::shared_ptr<ControlList> cl = _automated_controls.reader ();
@@ -666,11 +667,11 @@ Automatable::find_next_event (double start, double end, Evoral::ControlEvent& ne
 			}
 		}
 	}
-	return next_event.when != (start <= end ? std::numeric_limits<double>::max() : 0);
+	return next_event.when != (start <= end ? timepos_t::max (start.time_domain()) : timepos_t (start.time_domain()));
 }
 
 void
-Automatable::find_next_ac_event (boost::shared_ptr<AutomationControl> c, double start, double end, Evoral::ControlEvent& next_event) const
+Automatable::find_next_ac_event (boost::shared_ptr<AutomationControl> c, timepos_t const & start, timepos_t const & end, Evoral::ControlEvent& next_event) const
 {
 	assert (start <= end);
 
@@ -697,7 +698,7 @@ Automatable::find_next_ac_event (boost::shared_ptr<AutomationControl> c, double 
 }
 
 void
-Automatable::find_prev_ac_event (boost::shared_ptr<AutomationControl> c, double start, double end, Evoral::ControlEvent& next_event) const
+Automatable::find_prev_ac_event (boost::shared_ptr<AutomationControl> c, timepos_t const & start, timepos_t const & end, Evoral::ControlEvent& next_event) const
 {
 	assert (start > end);
 	boost::shared_ptr<SlavableAutomationControl> sc

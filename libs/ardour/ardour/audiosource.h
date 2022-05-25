@@ -41,20 +41,17 @@
 
 namespace ARDOUR {
 
-class LIBARDOUR_API AudioSource : virtual public Source,
-		public ARDOUR::Readable
+class LIBARDOUR_API AudioSource : virtual public Source, public ARDOUR::AudioReadable
 {
   public:
 	AudioSource (Session&, const std::string& name);
 	AudioSource (Session&, const XMLNode&);
 	virtual ~AudioSource ();
 
-	samplecnt_t readable_length() const { return _length; }
+	samplecnt_t readable_length_samples() const { return _length.samples(); }
 	virtual uint32_t n_channels()      const { return 1; }
 
-	virtual bool       empty() const;
-	samplecnt_t length (samplepos_t pos) const;
-	void       update_length (samplecnt_t cnt);
+	void       update_length (timepos_t const & dur);
 
 	virtual samplecnt_t available_peaks (double zoom) const;
 
@@ -63,7 +60,7 @@ class LIBARDOUR_API AudioSource : virtual public Source,
 
 	virtual float sample_rate () const = 0;
 
-	virtual void mark_streaming_write_completed (const Lock& lock);
+	virtual void mark_streaming_write_completed (const WriterLock& lock);
 
 	virtual bool can_truncate_peaks() const { return true; }
 
@@ -76,7 +73,7 @@ class LIBARDOUR_API AudioSource : virtual public Source,
 	mutable PBD::Signal0<void>  PeaksReady;
 	mutable PBD::Signal2<void,samplepos_t,samplepos_t>  PeakRangeReady;
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	int rename_peakfile (std::string newpath);
@@ -107,7 +104,16 @@ class LIBARDOUR_API AudioSource : virtual public Source,
 	static bool _build_missing_peakfiles;
 	static bool _build_peakfiles;
 
-	samplecnt_t           _length;
+	/* these collections of working buffers for supporting
+	   playlist's reading from potentially nested/recursive
+	   sources assume SINGLE THREADED reads by the butler
+	   thread, or a lock around calls that use them.
+	*/
+
+	static std::vector<boost::shared_array<Sample> > _mixdown_buffers;
+	static std::vector<boost::shared_array<gain_t> > _gain_buffers;
+	static Glib::Threads::Mutex    _level_buffer_lock;
+
 	std::string         _peakpath;
 
 	int initialize_peakfile (const std::string& path, const bool in_session = false);

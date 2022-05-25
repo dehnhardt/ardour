@@ -17,6 +17,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "pbd/stacktrace.h"
+
 #include "canvas/root_group.h"
 #include "canvas/canvas.h"
 
@@ -32,12 +34,13 @@ Root::Root (Canvas* canvas)
 }
 
 void
-Root::compute_bounding_box () const
+Root::size_request (Distance& w, Distance& h) const
 {
-	Container::compute_bounding_box ();
-
-	if (_bounding_box) {
-		Rect r (_bounding_box);
-		_canvas->request_size (Duple (r.width (), r.height ()));
+	if (_items.size() == 1) {
+		_items.front()->size_request (w, h);
+		return;
 	}
+
+	Item::size_request (w, h);
 }
+

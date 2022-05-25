@@ -52,9 +52,11 @@
 #include "pbd/basename.h"
 #include "pbd/file_utils.h"
 
+#include "ardour/auditioner.h"
 #include "ardour/audioengine.h"
 #include "ardour/filesystem_paths.h"
 #include "ardour/search_paths.h"
+#include "ardour/triggerbox.h"
 
 #include "gtkmm2ext/colors.h"
 #include "gtkmm2ext/utils.h"
@@ -801,6 +803,50 @@ ARDOUR_UI_UTILS::samples_as_time_string (samplecnt_t s, float rate, bool show_sa
 	return buf;
 }
 
+string
+ARDOUR_UI_UTILS::midi_channels_as_string (std::bitset<16> channels)
+{
+	if (channels.none ()) {
+		return _("none");
+	}
+
+	string rv;
+
+	for (int i = 0; i<16; i++) {
+
+		bool prior = i<1 ? false : channels.test(i-1);
+		bool current = channels.test(i);
+		bool next = i>14 ? false : channels.test(i+1);
+		bool nextnext = i>13 ? false : channels.test(i+2);
+		bool future = false;
+		for (int f = i+1; f<16; f++) {
+			if (channels.test(f)) {
+				future = true;
+			}
+		}
+
+		if (prior && current && next) {
+			/* I'm in the middle of a consecutive chain, maybe just add a dash */
+			if (!rv.empty() && (rv.rfind("-") != rv.length()-1 )) {
+				rv += "-";
+			}
+			continue;
+		}
+
+		if (current) {
+			/* here I am! */
+			rv+=to_string<int> (i+1);
+		}
+
+		if (current && future && !(next && nextnext)) {
+			/* there are channels after me but they are not 3 consecutive; add a comma */
+			rv += ",";
+		}
+	}
+
+	return rv;
+}
+
 bool
 ARDOUR_UI_UTILS::windows_overlap (Gtk::Window *a, Gtk::Window *b)
 {
@@ -868,4 +914,92 @@ Gtk::Menu*
 ARDOUR_UI_UTILS::shared_popup_menu ()
 {
 	return ARDOUR_UI::instance()->shared_popup_menu ();
+}
+
+bool
+ARDOUR_UI_UTILS::convert_drop_to_paths (vector<string>& paths, const SelectionData& data)
+{
+	vector<string> uris = data.get_uris();
+
+	if (uris.empty ()) {
+		/* This is seriously fucked up. Nautilus doesn't say that its URI lists
+		 * are actually URI lists. So do it by hand.
+		 */
+		if (data.get_target() != "text/plain") {
+			return false;
+		}
+
+		/* Parse the "uri-list" format that Nautilus provides,
+		 * where each pathname is delimited by \r\n.
+		 *
+		 * THERE MAY BE NO NULL TERMINATING CHAR!!!
+		 */
+		string txt = data.get_text();
+
+		/* copy to char* for easy char-wise checks and modification */
+		char* tmp = (char *) malloc (txt.length() + 1);
+		char* p   = tmp;
+
+		txt.copy (p, txt.length(), 0);
+		p[txt.length()] = '\0';
+
+		while (p) {
+			if (*p != '#') {
+				while (g_ascii_isspace (*p)) {
+					p++;
+				}
+
+				const char* q = p;
+				while (*q && (*q != '\n') && (*q != '\r')) {
+					q++;
+				}
+
+				if (q > p) {
+					--q;
+					while (q > p && g_ascii_isspace (*q)) {
+						--q;
+					}
+
+					if (q > p) {
+						uris.push_back (string (p, q - p + 1));
+					}
+				}
+			}
+			p = strchr (p, '\n');
+			if (p) {
+				++p;
+			}
+		}
+
+		free ((void*)tmp);
+
+		if (uris.empty()) {
+			return false;
+		}
+	}
+
+	for (vector<string>::iterator i = uris.begin(); i != uris.end(); ++i) {
+		if ((*i).substr (0,7) == "file://") {
+			paths.push_back (Glib::filename_from_uri (*i));
+		}
+	}
+
+	return !paths.empty ();
+}
+
+void
+ARDOUR_UI_UTILS::copy_patch_changes (boost::shared_ptr<ARDOUR::Auditioner> a, boost::shared_ptr<ARDOUR::Trigger> t)
+{
+	boost::shared_ptr<ARDOUR::MIDITrigger> mt = boost::dynamic_pointer_cast <ARDOUR::MIDITrigger> (t);
+
+	if (!mt || !a) {
+		return;
+	}
+	for (uint8_t c = 0; c < 16; ++c) {
+		if (a->patch_change (c).is_set()) {
+			mt->set_patch_change (a->patch_change (c));
+		} else {
+			mt->unset_patch_change (c);
+		}
+	}
 }

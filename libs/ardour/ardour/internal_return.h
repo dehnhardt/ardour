@@ -34,7 +34,7 @@ class InternalSend;
 class LIBARDOUR_API InternalReturn : public Processor
 {
 public:
-	InternalReturn (Session&, std::string const& name = "Return");
+	InternalReturn (Session&, Temporal::TimeDomain, std::string const& name = "Return");
 
 	void run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample, double speed, pframes_t nframes, bool);
 	bool configure_io (ChanCount, ChanCount);
@@ -46,7 +46,7 @@ public:
 	void set_playback_offset (samplecnt_t cnt);
 
 protected:
-	XMLNode& state ();
+	XMLNode& state () const;
 
 private:
 	/** sends that we are receiving data from */

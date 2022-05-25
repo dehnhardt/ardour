@@ -646,7 +646,7 @@ TransportMasterManager::set_state (XMLNode const & node, int version)
 }
 
 XMLNode&
-TransportMasterManager::get_state ()
+TransportMasterManager::get_state () const
 {
 	XMLNode* node = new XMLNode (state_node_name);
 
@@ -656,7 +656,7 @@ TransportMasterManager::get_state ()
 
 	Glib::Threads::RWLock::ReaderLock lm (lock);
 
-	for (TransportMasters::iterator t = _transport_masters.begin(); t != _transport_masters.end(); ++t) {
+	for (TransportMasters::const_iterator t = _transport_masters.begin(); t != _transport_masters.end(); ++t) {
 		node->add_child_nocopy ((*t)->get_state());
 	}
 
@@ -736,19 +736,6 @@ TransportMasterManager::restart ()
 		if (TransportMasterManager::instance().set_default_configuration ()) {
 			error << _("Cannot initialize transport master manager") << endmsg;
 			/* XXX now what? */
-		}
-	}
-}
-
-void
-TransportMasterManager::reconnect_ports ()
-{
-	DEBUG_TRACE (DEBUG::Slave, "reconnecting all transport master ports\n");
-	{
-		Glib::Threads::RWLock::ReaderLock lm (lock);
-
-		for (TransportMasters::const_iterator tm = _transport_masters.begin(); tm != _transport_masters.end(); ++tm) {
-			(*tm)->connect_port_using_state ();
 		}
 	}
 }

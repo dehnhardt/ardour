@@ -20,7 +20,9 @@
 #include <gtkmm/label.h>
 #include <gtkmm/viewport.h>
 
+#include "ardour/io_plug.h"
 #include "ardour/session.h"
+
 #include "gtkmm2ext/gui_thread.h"
 
 #include "plugin_dspload_ui.h"
@@ -74,7 +76,7 @@ PluginDSPLoadWindow::set_session (Session* s)
 	ArdourWindow::set_session (s);
 	if (!s) {
 		drop_references ();
-	} else if (is_visible ()) {
+	} else if (get_visible ()) {
 		refill_processors ();
 	}
 }
@@ -107,6 +109,9 @@ PluginDSPLoadWindow::clear_all_stats ()
 	RouteList routes = _session->get_routelist ();
 	for (RouteList::const_iterator i = routes.begin(); i != routes.end(); ++i) {
 		(*i)->foreach_processor (sigc::mem_fun (*this, &PluginDSPLoadWindow::clear_processor_stats));
+	}
+	for (auto const& iop : *_session->io_plugs ()) {
+		clear_pluginsert_stats (iop);
 	}
 }
 
@@ -183,6 +188,14 @@ PluginDSPLoadWindow::refill_processors ()
 				);
 	}
 
+	_session->IOPluginsChanged.connect (
+			_route_connections, invalidator (*this), boost::bind (&PluginDSPLoadWindow::refill_processors, this), gui_context()
+			);
+
+	for (auto const& iop : *_session->io_plugs ()) {
+		add_pluginsert_to_display (iop, iop->is_pre () ? _("I/O Pre") : _("I/O Post"));
+	}
+
 	if (_box.get_children().size() == 0) {
 		_box.add (*Gtk::manage (new Gtk::Label (_("No Plugins"))));
 		_box.show_all ();
@@ -196,14 +209,22 @@ void
 PluginDSPLoadWindow::add_processor_to_display (boost::weak_ptr<Processor> w, std::string const& route_name)
 {
 	boost::shared_ptr<Processor> p = w.lock ();
-	boost::shared_ptr<PluginInsert> pi = boost::dynamic_pointer_cast<PluginInsert> (p);
-	if (!pi || !pi->provides_stats ()) {
+	boost::shared_ptr<PlugInsertBase> pib = boost::dynamic_pointer_cast<PlugInsertBase> (p);
+	if (pib) {
+		add_pluginsert_to_display (pib, route_name);
+	}
+}
+
+void
+PluginDSPLoadWindow::add_pluginsert_to_display (boost::shared_ptr<PlugInsertBase> p, std::string const& route_name)
+{
+	if (!p->provides_stats ()) {
 		return;
 	}
 	p->DropReferences.connect (_processor_connections, MISSING_INVALIDATOR, boost::bind (&PluginDSPLoadWindow::refill_processors, this), gui_context());
-	PluginLoadStatsGui* plsg = new PluginLoadStatsGui (pi);
-	
-	std::string name = route_name + " - " + pi->name();
+	PluginLoadStatsGui* plsg = new PluginLoadStatsGui (p);
+
+	std::string name = route_name + " - " + p->plugin ()->name ();
 	Gtk::Frame* frame = new Gtk::Frame (name.c_str());
 	frame->add (*Gtk::manage (plsg));
 	_box.pack_start (*frame, Gtk::PACK_SHRINK, 2);
@@ -216,8 +237,14 @@ void
 PluginDSPLoadWindow::clear_processor_stats (boost::weak_ptr<Processor> w)
 {
 	boost::shared_ptr<Processor> p = w.lock ();
-	boost::shared_ptr<PluginInsert> pi = boost::dynamic_pointer_cast<PluginInsert> (p);
-	if (pi) {
-		pi->clear_stats ();
+	boost::shared_ptr<PlugInsertBase> pib = boost::dynamic_pointer_cast<PlugInsertBase> (p);
+	if (pib) {
+		clear_pluginsert_stats (pib);
 	}
+}
+
+void
+PluginDSPLoadWindow::clear_pluginsert_stats (boost::shared_ptr<PlugInsertBase> pib)
+{
+	pib->clear_stats ();
 }

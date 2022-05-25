@@ -24,9 +24,9 @@
 using namespace ARDOUR;
 using namespace PBD;
 
-MonitorControl::MonitorControl (Session& session, std::string const & name, Monitorable& m)
+MonitorControl::MonitorControl (Session& session, std::string const & name, Monitorable& m, Temporal::TimeDomain td)
 	: SlavableAutomationControl (session, MonitoringAutomation, ParameterDescriptor (MonitoringAutomation),
-	                             boost::shared_ptr<AutomationList>(new AutomationList(Evoral::Parameter(MonitoringAutomation))),
+	                             boost::shared_ptr<AutomationList>(new AutomationList(Evoral::Parameter(MonitoringAutomation), td)),
 	                             name)
 
 	, _monitorable (m)
@@ -45,7 +45,7 @@ MonitorControl::actually_set_value (double val, Controllable::GroupControlDispos
 }
 
 XMLNode&
-MonitorControl::get_state ()
+MonitorControl::get_state () const
 {
 	XMLNode& node (SlavableAutomationControl::get_state());
 	node.set_property (X_("monitoring"), _monitoring);

@@ -26,22 +26,24 @@
 #include <string>
 #include <time.h>
 #include <glibmm/threads.h>
-#include <boost/enable_shared_from_this.hpp>
+
 #include "pbd/stateful.h"
 #include "pbd/xml++.h"
+
 #include "evoral/Sequence.h"
-#include "evoral/Range.h"
+
+#include "temporal/range.h"
+
 #include "ardour/ardour.h"
 #include "ardour/buffer.h"
 #include "ardour/midi_cursor.h"
 #include "ardour/source.h"
-#include "ardour/beats_samples_converter.h"
 
 namespace ARDOUR {
 
 class MidiChannelFilter;
 class MidiModel;
-class MidiStateTracker;
+class MidiNoteTracker;
 
 template<typename T> class MidiRingBuffer;
 
@@ -64,7 +66,7 @@ class LIBARDOUR_API MidiSource : virtual public Source
 	 * @param end time of latest event that can be written.
 	 * @return zero on success, non-zero if the write failed for any reason.
 	 */
-	int write_to (const Lock&                   lock,
+	int write_to (const ReaderLock&             lock,
 	              boost::shared_ptr<MidiSource> newsrc,
 	              Temporal::Beats               begin = Temporal::Beats(),
 	              Temporal::Beats               end   = std::numeric_limits<Temporal::Beats>::max());
@@ -78,7 +80,7 @@ class LIBARDOUR_API MidiSource : virtual public Source
 	 * @param end time of latest event that can be written.
 	 * @return zero on success, non-zero if the write failed for any reason.
 	 */
-	int export_write_to (const Lock&                   lock,
+	int export_write_to (const ReaderLock&             lock,
 	                     boost::shared_ptr<MidiSource> newsrc,
 	                     Temporal::Beats               begin,
 	                     Temporal::Beats               end);
@@ -93,23 +95,19 @@ class LIBARDOUR_API MidiSource : virtual public Source
 	 * @param loop_range If non-null, all event times will be mapped into this loop range.
 	 * @param cursor Cached iterator to start copying events
 	 * @param filter Channel filter to apply or NULL to disable filter
-	 * @param tracker an optional pointer to MidiStateTracker object, for note on/off tracking.
+	 * @param tracker an optional pointer to MidiNoteTracker object, for note on/off tracking.
 	 * @param filtered Parameters whose MIDI messages will not be returned.
-	 * @param pos_beats Start position (quarter note = \p pos_beats - \p start_beats)
-	 * @param start_beats Start position offset
 	 */
-	virtual samplecnt_t midi_read (const Lock&                        lock,
-	                              Evoral::EventSink<samplepos_t>&     dst,
-	                              samplepos_t                         source_start,
-	                              samplepos_t                         start,
-	                              samplecnt_t                         cnt,
-	                              Evoral::Range<samplepos_t>*         loop_range,
-	                              MidiCursor&                        cursor,
-	                              MidiStateTracker*                  tracker,
-	                              MidiChannelFilter*                 filter,
-	                              const std::set<Evoral::Parameter>& filtered,
-	                              const double                       pos_beats,
-	                              const double                       start_beats) const;
+	virtual timecnt_t midi_read (const ReaderLock&                  lock,
+	                             Evoral::EventSink<samplepos_t>&    dst,
+	                             timepos_t const &                  source_start,
+	                             timepos_t const &                  start,
+	                             timecnt_t const &                  cnt,
+	                             Temporal::Range*                   loop_range,
+	                             MidiCursor&                        cursor,
+	                             MidiNoteTracker*                   tracker,
+	                             MidiChannelFilter*                 filter,
+	                             const std::set<Evoral::Parameter>& filtered);
 
 	/** Write data from a MidiRingBuffer to this source.
 	 * @param lock Reference to the Mutex to lock before modification
@@ -117,33 +115,29 @@ class LIBARDOUR_API MidiSource : virtual public Source
 	 * @param source_start This source's start position in session samples.
 	 * @param cnt The length of time to write.
 	 */
-	virtual samplecnt_t midi_write (const Lock&                 lock,
-	                               MidiRingBuffer<samplepos_t>& source,
-	                               samplepos_t                  source_start,
-	                               samplecnt_t                  cnt);
+	virtual timecnt_t midi_write (const WriterLock&              lock,
+	                                MidiRingBuffer<samplepos_t>& source,
+	                                timepos_t const &            source_start,
+	                                timecnt_t const &            cnt);
 
 	/** Append a single event with a timestamp in beats.
 	 *
 	 * Caller must ensure that the event is later than the last written event.
 	 */
-	virtual void append_event_beats(const Lock&                           lock,
+	virtual void append_event_beats(const WriterLock& lock,
 	                                const Evoral::Event<Temporal::Beats>& ev) = 0;
 
 	/** Append a single event with a timestamp in samples.
 	 *
 	 * Caller must ensure that the event is later than the last written event.
 	 */
-	virtual void append_event_samples(const Lock&                      lock,
+	virtual void append_event_samples(const WriterLock&                lock,
 	                                 const Evoral::Event<samplepos_t>& ev,
 	                                 samplepos_t                       source_start) = 0;
 
-	virtual bool       empty () const;
-	virtual samplecnt_t length (samplepos_t pos) const;
-	virtual void       update_length (samplecnt_t);
-
-	virtual void mark_streaming_midi_write_started (const Lock& lock, NoteMode mode);
-	virtual void mark_streaming_write_started (const Lock& lock);
-	virtual void mark_streaming_write_completed (const Lock& lock);
+	virtual void mark_streaming_midi_write_started (const WriterLock& lock, NoteMode mode);
+	virtual void mark_streaming_write_started (const WriterLock& lock);
+	virtual void mark_streaming_write_completed (const WriterLock& lock);
 
 	/** Mark write starting with the given time parameters.
 	 *
@@ -152,12 +146,10 @@ class LIBARDOUR_API MidiSource : virtual public Source
 	 *
 	 * @param position The timeline position the source now starts at.
 	 * @param capture_length The current length of the capture, which may not
-	 * be zero if record is armed while rolling.
-	 * @param loop_length The loop length if looping, otherwise zero.
+	 * be zero if record is armed while rolling. In samples because we
+	 * record using timestamps derived from the audio engine.
 	 */
-	void mark_write_starting_now (samplecnt_t position,
-	                              samplecnt_t capture_length,
-	                              samplecnt_t loop_length);
+	void mark_write_starting_now (timepos_t const & position, samplecnt_t capture_length);
 
 	/* like ::mark_streaming_write_completed() but with more arguments to
 	 * allow control over MIDI-specific behaviour. Expected to be used only
@@ -165,36 +157,33 @@ class LIBARDOUR_API MidiSource : virtual public Source
 	 * etc.
 	 */
 	virtual void mark_midi_streaming_write_completed (
-		const Lock&                                        lock,
+		const WriterLock&                                  lock,
 		Evoral::Sequence<Temporal::Beats>::StuckNoteOption stuck_option,
 		Temporal::Beats                                    when = Temporal::Beats());
 
 	virtual void session_saved();
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	bool length_mutable() const { return true; }
 
-	void     set_length_beats(TimeType l) { _length_beats = l; }
-	TimeType length_beats() const         { return _length_beats; }
-
-	virtual void load_model(const Glib::Threads::Mutex::Lock& lock, bool force_reload=false) = 0;
-	virtual void destroy_model(const Glib::Threads::Mutex::Lock& lock) = 0;
+	virtual void load_model(const WriterLock& lock, bool force_reload=false) = 0;
+	virtual void destroy_model(const WriterLock& lock) = 0;
 
 	/** Reset cached information (like iterators) when things have changed.
 	 * @param lock Source lock, which must be held by caller.
 	 */
-	void invalidate(const Glib::Threads::Mutex::Lock& lock);
+	void invalidate(const WriterLock& lock);
 
 	/** Thou shalt not emit this directly, use invalidate() instead. */
 	mutable PBD::Signal1<void, bool> Invalidated;
 
-	void set_note_mode(const Glib::Threads::Mutex::Lock& lock, NoteMode mode);
+	void set_note_mode(const WriterLock& lock, NoteMode mode);
 
 	boost::shared_ptr<MidiModel> model() { return _model; }
-	void set_model(const Glib::Threads::Mutex::Lock& lock, boost::shared_ptr<MidiModel>);
-	void drop_model(const Glib::Threads::Mutex::Lock& lock);
+	void set_model(const WriterLock& lock, boost::shared_ptr<MidiModel>);
+	void drop_model(const WriterLock& lock);
 
 	Evoral::ControlList::InterpolationStyle interpolation_of (Evoral::Parameter) const;
 	void set_interpolation_of (Evoral::Parameter, Evoral::ControlList::InterpolationStyle);
@@ -214,16 +203,16 @@ class LIBARDOUR_API MidiSource : virtual public Source
 	PBD::Signal2<void, Evoral::Parameter, AutoState> AutomationStateChanged;
 
   protected:
-	virtual void flush_midi(const Lock& lock) = 0;
+	virtual void flush_midi(const WriterLock& lock) = 0;
 
-	virtual samplecnt_t read_unlocked (const Lock&                    lock,
-	                                  Evoral::EventSink<samplepos_t>& dst,
-	                                  samplepos_t                     position,
-	                                  samplepos_t                     start,
-	                                  samplecnt_t                     cnt,
-	                                  Evoral::Range<samplepos_t>*     loop_range,
-	                                  MidiStateTracker*              tracker,
-	                                  MidiChannelFilter*             filter) const = 0;
+	virtual timecnt_t read_unlocked (const ReaderLock&               lock,
+	                                 Evoral::EventSink<samplepos_t>& dst,
+	                                 timepos_t const &               position,
+	                                 timepos_t const &               start,
+	                                 timecnt_t const &               cnt,
+	                                 Temporal::Range*                loop_range,
+	                                 MidiNoteTracker*               tracker,
+	                                 MidiChannelFilter*              filter) const = 0;
 
 	/** Write data to this source from a MidiRingBuffer.
 	 * @param lock Reference to the Mutex to lock before modification
@@ -231,21 +220,16 @@ class LIBARDOUR_API MidiSource : virtual public Source
 	 * @param position This source's start position in session samples.
 	 * @param cnt The duration of this block to write for.
 	 */
-	virtual samplecnt_t write_unlocked (const Lock&                 lock,
-	                                   MidiRingBuffer<samplepos_t>& source,
-	                                   samplepos_t                  position,
-	                                   samplecnt_t                  cnt) = 0;
+	virtual timecnt_t write_unlocked (const WriterLock&            lock,
+	                                  MidiRingBuffer<samplepos_t>& source,
+	                                  timepos_t const &            position,
+	                                  timecnt_t const &            cnt) = 0;
 
 	boost::shared_ptr<MidiModel> _model;
 	bool                         _writing;
 
-	Temporal::Beats _length_beats;
-
 	/** The total duration of the current capture. */
-	samplepos_t _capture_length;
-
-	/** Length of transport loop during current capture, or zero. */
-	samplepos_t _capture_loop_length;
+	samplecnt_t _capture_length;
 
 	/** Map of interpolation styles to use for Parameters; if they are not in this map,
 	 *  the correct interpolation style can be obtained from EventTypeMap::interpolation_of ()

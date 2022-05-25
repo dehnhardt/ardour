@@ -26,6 +26,8 @@
 #include "pbd/compose.h"
 #include "pbd/pthread_utils.h"
 
+#include "temporal/tempo.h"
+
 #include "ardour/audioengine.h"
 #include "ardour/automation_control.h"
 #include "ardour/automation_watch.h"
@@ -87,7 +89,15 @@ AutomationWatch::add_automation_watch (boost::shared_ptr<AutomationControl> ac)
 		DEBUG_TRACE (DEBUG::Automation, string_compose ("\ttransport is rolling @ %1, audible = %2so enter write pass\n",
 								_session->transport_speed(), _session->audible_sample()));
 		/* add a guard point since we are already moving */
-		ac->list()->set_in_write_pass (true, true, _session->audible_sample());
+		timepos_t pos;
+
+		if (ac->list()->time_domain() == Temporal::AudioTime) {
+			pos = timepos_t (_session->audible_sample());
+		} else {
+			pos = timepos_t (Temporal::TempoMap::use()->quarters_at_sample (_session->audible_sample()));
+		}
+
+		ac->list()->set_in_write_pass (true, true, pos);
 	}
 
 	/* we can't store shared_ptr<Destructible> in connections because it
@@ -142,7 +152,7 @@ AutomationWatch::transport_stop_automation_watches (samplepos_t when)
 	}
 
 	for (AutomationWatches::iterator i = tmp.begin(); i != tmp.end(); ++i) {
-		(*i)->stop_touch (when);
+		(*i)->stop_touch (timepos_t (when));
 	}
 }
 
@@ -165,7 +175,7 @@ AutomationWatch::timer ()
 					if (sc) {
 						val = sc->reduce_by_masters (val, true);
 					}
-					(*aw)->list()->add (time, val, true);
+					(*aw)->list()->add (timepos_t (time), val, true);
 				}
 			}
 		} else if (time != _last_time) {  //transport stopped or reversed.  stop the automation pass and start a new one (for bonus points, someday store the previous pass in an undo record)
@@ -175,7 +185,7 @@ AutomationWatch::timer ()
 										(*aw)->alist()->automation_write()));
 				(*aw)->list()->set_in_write_pass (false);
 				if ( (*aw)->alist()->automation_write() ) {
-					(*aw)->list()->set_in_write_pass (true, true, time);
+					(*aw)->list()->set_in_write_pass (true, true, timepos_t (time));
 				}
 			}
 		}
@@ -189,10 +199,10 @@ AutomationWatch::timer ()
 void
 AutomationWatch::thread ()
 {
-	pbd_set_thread_priority (pthread_self(), PBD_SCHED_FIFO, AudioEngine::instance()->client_real_time_priority() - 2);
+	pbd_set_thread_priority (pthread_self(), PBD_SCHED_FIFO, AudioEngine::instance()->client_real_time_priority() - 2); // XXX
 	pthread_set_name ("AutomationWatch");
 	while (_run_thread) {
-		Glib::usleep ((gulong) floor (Config->get_automation_interval_msecs() * 1000));
+		Glib::usleep ((gulong) floor (Config->get_automation_interval_msecs() * 1000)); // TODO use pthread_cond_timedwait on _run_thread
 		timer ();
 	}
 }
@@ -212,7 +222,7 @@ AutomationWatch::set_session (Session* s)
 
 	if (_session) {
 		_run_thread = true;
-		_thread = Glib::Threads::Thread::create (boost::bind (&AutomationWatch::thread, this));
+		_thread = PBD::Thread::create (boost::bind (&AutomationWatch::thread, this));
 
 		_session->TransportStateChange.connect_same_thread (transport_connection, boost::bind (&AutomationWatch::transport_state_change, this));
 	}

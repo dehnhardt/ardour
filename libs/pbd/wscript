@@ -51,6 +51,7 @@ libpbd_sources = [
     'file_archive.cc',
     'file_utils.cc',
     'fpu.cc',
+    'glib_event_source.cc',
     'id.cc',
     'locale_guard.cc',
     'localtime_r.cc',
@@ -61,6 +62,7 @@ libpbd_sources = [
     'openuri.cc',
     'pathexpand.cc',
     'pbd.cc',
+    'pcg_rand.cc',
     'pool.cc',
     'property_list.cc',
     'pthread_utils.cc',
@@ -101,8 +103,6 @@ def options(opt):
                    help='Build internal libs as shared libraries')
 
 def configure(conf):
-    conf.load('compiler_cxx')
-    autowaf.configure(conf)
     autowaf.check_pkg(conf, 'libxml-2.0', uselib_store='XML')
     autowaf.check_pkg(conf, 'sigc++-2.0', uselib_store='SIGCPP', atleast_version='2.0')
     autowaf.check_pkg(conf, 'libcurl', uselib_store='CURL', atleast_version='7.0.0', mandatory=True)
@@ -173,7 +173,7 @@ def build(bld):
     obj.name         = 'libpbd'
     obj.target       = 'pbd'
     obj.use          = 'pbdsignals'
-    obj.uselib       = 'GLIBMM SIGCPP XML UUID SNDFILE GIOMM ARCHIVE CURL XML'
+    obj.uselib       = 'GLIBMM SIGCPP XML UUID SNDFILE GIOMM ARCHIVE CURL'
     if sys.platform == 'darwin':
         TaskGen.task_gen.mappings['.mm'] = TaskGen.task_gen.mappings['.cc']
         if 'cocoa_open_uri.mm' not in obj.source:

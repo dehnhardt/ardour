@@ -130,7 +130,7 @@ class US2400Protocol
 	int set_subview_mode (SubViewMode, boost::shared_ptr<ARDOUR::Stripable>);
 	void display_view_mode ();
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	/* Note: because Mackie control is inherently a duplex protocol,
@@ -213,6 +213,10 @@ class US2400Protocol
 	void add_down_select_button (int surface, int strip);
 	void remove_down_select_button (int surface, int strip);
 	void select_range (uint32_t pressed);
+
+	int get_sends_bank ();
+
+	CONTROL_PROTOCOL_THREADS_NEED_TEMPO_MAP_DECL();
 
   protected:
 	// shut down the surface
@@ -297,11 +301,12 @@ class US2400Protocol
 	ButtonMap                 button_map;
 	bool                     _metering_active;
 	bool                     _initialized;
-	XMLNode*                 configuration_state;
+	mutable XMLNode*         configuration_state;
 	int                      state_version;
 	int                      _last_bank[9];
 	bool                     marker_modifier_consumed_by_button;
 	bool                     nudge_modifier_consumed_by_button;
+	int						 _sends_bank;
 
 	boost::shared_ptr<ArdourSurface::US2400::Surface>	_master_surface;
 
@@ -319,7 +324,7 @@ class US2400Protocol
 	void stripable_selection_changed ();
        void initialize ();
         int set_device_info (const std::string& device_name);
-	void update_configuration_state ();
+	void update_configuration_state () const;
 
 	/* MIDI port connection management */
 

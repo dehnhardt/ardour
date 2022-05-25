@@ -107,7 +107,7 @@ Source::fix_writable_flags ()
 }
 
 XMLNode&
-Source::get_state ()
+Source::get_state () const
 {
 	XMLNode *node = new XMLNode (X_("Source"));
 
@@ -142,6 +142,15 @@ Source::get_state ()
 		node->add_child_nocopy (get_cue_state());
 	}
 
+	if (!segment_descriptors.empty()) {
+		XMLNode* sd_node = new XMLNode (X_("SegmentDescriptors"));
+		for (auto const & sd : segment_descriptors) {
+			sd_node->add_child_nocopy (sd.get_state());
+		}
+		node->add_child_nocopy (*sd_node);
+	}
+
+
 	return *node;
 }
 
@@ -152,7 +161,7 @@ Source::set_state (const XMLNode& node, int version)
 	const CueMarkers old_cues = _cue_markers;
 	XMLNodeList nlist = node.children();
 	int64_t t;
-	samplepos_t ts;
+	XMLNode* sd_node;
 
 	if (node.name() == X_("Cues")) {
 		/* partial state */
@@ -179,14 +188,12 @@ Source::set_state (const XMLNode& node, int version)
 		_timestamp = (time_t) t;
 	}
 
-	if (node.get_property ("natural-position", ts)) {
-		_natural_position = ts;
+	if (node.get_property ("natural-position", _natural_position)) {
 		_have_natural_position = true;
-	} else if (node.get_property ("timeline-position", ts)) {
+	} else if (node.get_property ("timeline-position", _natural_position)) {
 		/* some older versions of ardour might have stored this with
 		   this property name.
 		*/
-		_natural_position = ts;
 		_have_natural_position = true;
 	}
 
@@ -244,6 +251,20 @@ Source::set_state (const XMLNode& node, int version)
 		_flags = Flag (_flags & ~(Writable|Removable|RemovableIfEmpty|RemoveAtDestroy|CanRename));
 	}
 
+	sd_node = node.child (X_("SegmentDescriptors"));
+
+	if (sd_node) {
+		segment_descriptors.clear ();
+		try {
+			XMLNodeList nlist = sd_node->children();
+			for (XMLNodeIterator niter = nlist.begin(); niter != nlist.end(); ++niter) {
+				segment_descriptors.push_back (SegmentDescriptor (**niter, version));
+			}
+		} catch (...) {
+			error << string_compose (_("Segment descriptors not loaded for source %1"), name()) << endmsg;
+		}
+	}
+
 	/* support to make undo/redo actually function. Very few things about
 	 * Sources are ever part of undo/redo history, but this can
 	 * be. Undo/Redo uses a MementoCommand<> pattern, which will not in
@@ -282,7 +303,7 @@ Source::set_cue_state (XMLNode const & cues, int /* version */)
 
 	for (XMLNodeConstIterator citer = cuelist.begin(); citer != cuelist.end(); ++citer) {
 		string text;
-		samplepos_t position;
+		timepos_t position;
 
 		if (!(*citer)->get_property (X_("text"), text) || !(*citer)->get_property (X_("position"), position)) {
 			continue;
@@ -394,7 +415,7 @@ Source::mark_for_remove ()
 }
 
 void
-Source::set_natural_position (samplepos_t pos)
+Source::set_natural_position (timepos_t const & pos)
 {
 	_natural_position = pos;
 	_have_natural_position = true;
@@ -459,9 +480,9 @@ Source::add_cue_marker (CueMarker const & cm)
 }
 
 bool
-Source::move_cue_marker (CueMarker const & cm, samplepos_t source_relative_position)
+Source::move_cue_marker (CueMarker const & cm, timepos_t const & source_relative_position)
 {
-	if (source_relative_position > length (0)) {
+	if (source_relative_position > length ()) {
 		return false;
 	}
 
@@ -506,4 +527,45 @@ Source::clear_cue_markers ()
 	_cue_markers.clear();
 	CueMarkersChanged(); /* EMIT SIGNAL */
 	return true;
+}
+
+bool
+Source::empty () const
+{
+	return _length == timepos_t ();
+}
+
+bool
+Source::get_segment_descriptor (TimelineRange const & range, SegmentDescriptor& segment)
+{
+	/* Note: since we disallow overlapping segments, any overlap between
+	   the @param range and an existing segment counts as a match.
+	*/
+
+	for (auto const & sd : segment_descriptors) {
+		if (coverage_exclusive_ends (sd.position(), sd.position() + sd.extent(),
+		                             segment.position(), segment.position() + segment.extent()) != Temporal::OverlapNone) {
+			segment = sd;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+int
+Source::set_segment_descriptor (SegmentDescriptor const & sr)
+{
+	/* We disallow any overlap between segments. They must describe non-overlapping ranges */
+
+	for (auto const & sd : segment_descriptors) {
+		if (coverage_exclusive_ends (sd.position(), sd.position() + sd.extent(),
+		                             sr.position(), sr.position() + sr.extent()) != Temporal::OverlapNone) {
+			return -1;
+		}
+	}
+
+	segment_descriptors.push_back (sr);
+
+	return 0;
 }

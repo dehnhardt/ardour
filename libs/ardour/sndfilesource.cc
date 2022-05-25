@@ -228,7 +228,7 @@ SndFileSource::SndFileSource (Session& s, const AudioFileSource& other, const st
 	, _sndfile (0)
 	, _broadcast_info (0)
 {
-	if (other.readable_length () == 0) {
+	if (other.readable_length_samples () == 0) {
 		throw failed_constructor();
 	}
 
@@ -287,7 +287,7 @@ SndFileSource::SndFileSource (Session& s, const AudioFileSource& other, const st
 		off += len;
 		len = other.read (buf, off, 8192, other.channel ());
 		if (progress) {
-			progress->set_progress (0.5f * (float) off / other.readable_length ());
+			progress->set_progress (0.5f * (float) off / other.readable_length_samples ());
 		}
 	}
 
@@ -309,7 +309,7 @@ SndFileSource::SndFileSource (Session& s, const AudioFileSource& other, const st
 		off += len;
 		len = other.read (buf, off, 8192, other.channel ());
 		if (progress) {
-			progress->set_progress (0.5f + 0.5f * (float) off / other.readable_length ());
+			progress->set_progress (0.5f + 0.5f * (float) off / other.readable_length_samples ());
 		}
 	}
 }
@@ -346,7 +346,7 @@ SndFileSource::open ()
 // We really only want to use g_open for all platforms but because of this
 // method(SndfileSource::open), the compiler(or at least GCC) is confused
 // because g_open will expand to "open" on non-POSIX systems and needs the
-// global namespace qualifer. The problem is since since C99 ::g_open will
+// global namespace qualifier. The problem is since since C99 ::g_open will
 // apparently expand to ":: open"
 #ifdef PLATFORM_WINDOWS
 	int fd = g_open (_path.c_str(), writable() ? O_CREAT | O_RDWR : O_RDONLY, writable() ? 0644 : 0444);
@@ -381,7 +381,8 @@ SndFileSource::open ()
 		return -1;
 	}
 
-	_length = _info.frames;
+
+	_length = timecnt_t (_info.frames);
 
 #ifdef HAVE_RF64_RIFF
 	if (_file_is_new && _length == 0 && writable()) {
@@ -423,12 +424,12 @@ SndFileSource::open ()
 		/* newly created files will not have a BWF header at this point in time.
 		 * Import will have called Source::set_natural_position() if one exists
 		 * in the original. */
-		header_position_offset = _natural_position;
+		header_position_offset = _natural_position.samples();
 	}
 
 	/* If a BWF header exists, set our _natural_position from it */
 	if (bwf_info_exists) {
-		set_natural_position (_broadcast_info->get_time_reference());
+		set_natural_position (timepos_t (_broadcast_info->get_time_reference()));
 	}
 
 	if (_length != 0 && !bwf_info_exists) {
@@ -504,17 +505,17 @@ SndFileSource::read_unlocked (Sample *dst, samplepos_t start, samplecnt_t cnt) c
 		return 0;
         }
 
-	if (start > _length) {
+        if (start > _length.samples()) {
 
 		/* read starts beyond end of data, just memset to zero */
 
 		file_cnt = 0;
 
-	} else if (start + cnt > _length) {
+        } else if (start + cnt > _length.samples()) {
 
 		/* read ends beyond end of data, read some, memset the rest */
 
-		file_cnt = _length - start;
+	        file_cnt = _length.samples() - start;
 
 	} else {
 
@@ -535,7 +536,7 @@ SndFileSource::read_unlocked (Sample *dst, samplepos_t start, samplecnt_t cnt) c
 		if (sf_seek (_sndfile, (sf_count_t) start, SEEK_SET|SFM_READ) != (sf_count_t) start) {
 			char errbuf[256];
 			sf_error_str (0, errbuf, sizeof (errbuf) - 1);
-			error << string_compose(_("SndFileSource: could not seek to sample %1 within %2 (%3)"), start, _name.val().substr (1), errbuf) << endmsg;
+			error << string_compose(_("SndFileSource: could not seek to sample %1 within %2 (%3)"), start, _name, errbuf) << endmsg;
 			return 0;
 		}
 
@@ -544,7 +545,7 @@ SndFileSource::read_unlocked (Sample *dst, samplepos_t start, samplecnt_t cnt) c
 			if (ret != file_cnt) {
 				char errbuf[256];
 				sf_error_str (0, errbuf, sizeof (errbuf) - 1);
-				error << string_compose(_("SndFileSource: @ %1 could not read %2 within %3 (%4) (len = %5, ret was %6)"), start, file_cnt, _name.val().substr (1), errbuf, _length, ret) << endl;
+				error << string_compose(_("SndFileSource: @ %1 could not read %2 within %3 (%4) (len = %5, ret was %6)"), start, file_cnt, _name, errbuf, _length, ret) << endl;
 			}
 			if (_gain != 1.f) {
 				for (samplecnt_t i = 0; i < ret; ++i) {
@@ -604,13 +605,15 @@ SndFileSource::nondestructive_write_unlocked (Sample *data, samplecnt_t cnt)
 		return 0;
 	}
 
-	samplepos_t sample_pos = _length;
+	assert (_length.time_domain() == Temporal::AudioTime);
+	samplepos_t sample_pos = _length.samples();
 
 	if (write_float (data, sample_pos, cnt) != cnt) {
 		return 0;
 	}
 
-	update_length (_length + cnt);
+	assert (_length.time_domain() == Temporal::AudioTime);
+	update_length (timepos_t (_length.samples() + cnt));
 
 	if (_build_peakfiles) {
 		compute_and_write_peaks (data, sample_pos, cnt, true, true);
@@ -622,7 +625,7 @@ SndFileSource::nondestructive_write_unlocked (Sample *data, samplecnt_t cnt)
 int
 SndFileSource::update_header (samplepos_t when, struct tm& now, time_t tnow)
 {
-	set_natural_position (when);
+	set_natural_position (timepos_t (when));
 
 	if (_flags & Broadcast) {
 		if (setup_broadcast_info (when, now, tnow)) {
@@ -703,7 +706,7 @@ SndFileSource::set_header_natural_position ()
 	}
 	assert (_broadcast_info);
 
-	_broadcast_info->set_time_reference (_natural_position);
+	_broadcast_info->set_time_reference (_natural_position.samples());
 
 	if (_sndfile == 0 || !_broadcast_info->write_to_file (_sndfile)) {
 		error << string_compose (_("cannot set broadcast info for audio file %1 (%2); dropping broadcast info for this file"),
@@ -736,7 +739,7 @@ SndFileSource::write_float (Sample* data, samplepos_t sample_pos, samplecnt_t cn
 }
 
 void
-SndFileSource::set_natural_position (samplepos_t pos)
+SndFileSource::set_natural_position (timepos_t const & pos)
 {
 	AudioFileSource::set_natural_position (pos);
 }

@@ -42,7 +42,7 @@ class TimeFXDialog : public ArdourDialog, public ProgressReporter
 {
 public:
 	/* We need a position so that BBT mode in the clock can function */
-	TimeFXDialog (Editor& e, bool for_pitch, ARDOUR::samplecnt_t old_length, ARDOUR::samplecnt_t new_length, ARDOUR::samplepos_t position);
+	TimeFXDialog (Editor& e, bool for_pitch, Temporal::timecnt_t const & old_length, Temporal::timecnt_t const & new_length, Temporal::timepos_t const & position);
 
 	ARDOUR::TimeFXRequest request;
 	Editor&               editor;
@@ -71,7 +71,7 @@ public:
 	void cancel_in_progress ();
 	gint delete_in_progress (GdkEventAny*);
 
-	float get_time_fraction () const;
+	Temporal::ratio_t get_time_fraction () const;
 	float get_pitch_fraction () const;
 
 	void start_updates ();
@@ -86,7 +86,7 @@ public:
 	}
 
 private:
-	ARDOUR::samplecnt_t original_length;
+	Temporal::timecnt_t original_length;
 	Gtk::Adjustment     pitch_octave_adjustment;
 	Gtk::Adjustment     pitch_semitone_adjustment;
 	Gtk::Adjustment     pitch_cent_adjustment;

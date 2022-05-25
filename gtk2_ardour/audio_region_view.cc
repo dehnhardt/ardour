@@ -114,7 +114,6 @@ static Cairo::RefPtr<Cairo::Pattern> create_pending_peak_pattern() {
 AudioRegionView::AudioRegionView (ArdourCanvas::Container *parent, RouteTimeAxisView &tv, boost::shared_ptr<AudioRegion> r, double spu,
 				  uint32_t basic_color)
 	: RegionView (parent, tv, r, spu, basic_color)
-	, sync_mark(0)
 	, fade_in_handle(0)
 	, fade_out_handle(0)
 	, fade_in_trim_handle(0)
@@ -135,7 +134,6 @@ AudioRegionView::AudioRegionView (ArdourCanvas::Container *parent, RouteTimeAxis
 AudioRegionView::AudioRegionView (ArdourCanvas::Container *parent, RouteTimeAxisView &tv, boost::shared_ptr<AudioRegion> r, double spu,
 				  uint32_t basic_color, bool recording, TimeAxisViewItem::Visibility visibility)
 	: RegionView (parent, tv, r, spu, basic_color, recording, visibility)
-	, sync_mark(0)
 	, fade_in_handle(0)
 	, fade_out_handle(0)
 	, fade_in_trim_handle(0)
@@ -483,7 +481,7 @@ AudioRegionView::reset_width_dependent_items (double pixel_width)
 		return;
 	}
 
-	samplepos_t position = _region->position();
+	samplepos_t position = _region->position_sample();
 
 	AnalysisFeatureList::const_iterator i;
 	list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
@@ -598,7 +596,7 @@ AudioRegionView::set_height (gdouble height)
 	reset_fade_shapes ();
 
 	/* Update heights for any feature lines */
-	samplepos_t position = _region->position();
+	samplepos_t position = _region->position_sample();
 	list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
 	double y1;
 	if (_height >= NAME_HIGHLIGHT_THRESH) {
@@ -629,7 +627,7 @@ AudioRegionView::reset_fade_shapes ()
 void
 AudioRegionView::reset_fade_in_shape ()
 {
-	reset_fade_in_shape_width (audio_region(), (samplecnt_t) audio_region()->fade_in()->back()->when);
+	reset_fade_in_shape_width (audio_region(), audio_region()->fade_in()->back()->when.samples());
 }
 
 void
@@ -645,7 +643,7 @@ AudioRegionView::reset_fade_in_shape_width (boost::shared_ptr<AudioRegion> ar, s
 	width = std::max ((samplecnt_t) 64, width);
 
 	/* round here to prevent little visual glitches with sub-pixel placement */
-	double const pwidth = floor (width / samples_per_pixel);
+	double const pwidth  = (double) width /  samples_per_pixel;
 	double const handle_left = pwidth;
 
 	/* Put the fade in handle so that its left side is at the end-of-fade line */
@@ -662,7 +660,7 @@ AudioRegionView::reset_fade_in_shape_width (boost::shared_ptr<AudioRegion> ar, s
 		entered();
 	}
 
-	if (pwidth < 5) {
+	if (pwidth < 5.f) {
 		hide_start_xfade();
 		return;
 	}
@@ -686,12 +684,13 @@ AudioRegionView::reset_fade_in_shape_width (boost::shared_ptr<AudioRegion> ar, s
 	Points::size_type pi;
 	boost::shared_ptr<const Evoral::ControlList> list (audio_region()->fade_in());
 	Evoral::ControlList::const_iterator x;
-	double length = list->length();
+	samplecnt_t length = list->length().samples();
 
 	points.assign (list->size(), Duple());
 
 	for (x = list->begin(), pi = 0; x != list->end(); ++x, ++pi) {
-		points[pi].x = (pwidth * ((*x)->when/length));
+		const double p = (*x)->when.samples();
+		points[pi].x = (p * pwidth) / length;
 		points[pi].y = effective_height - ((*x)->value * (effective_height - 1.));
 	}
 
@@ -708,7 +707,7 @@ AudioRegionView::reset_fade_in_shape_width (boost::shared_ptr<AudioRegion> ar, s
 void
 AudioRegionView::reset_fade_out_shape ()
 {
-	reset_fade_out_shape_width (audio_region(), (samplecnt_t) audio_region()->fade_out()->back()->when);
+	reset_fade_out_shape_width (audio_region(), audio_region()->fade_out()->back()->when.samples());
 }
 
 void
@@ -730,8 +729,8 @@ AudioRegionView::reset_fade_out_shape_width (boost::shared_ptr<AudioRegion> ar, 
 	 * width is zero. Hence the additional + 1.0 at the end.
 	 */
 
-	double const handle_right = rint(trackview.editor().sample_to_pixel (_region->length()) - pwidth);
-	double const trim_handle_right = rint(trackview.editor().sample_to_pixel (_region->length()));
+	double const handle_right = rint(trackview.editor().sample_to_pixel (_region->length_samples()) - pwidth);
+	double const trim_handle_right = rint(trackview.editor().sample_to_pixel (_region->length_samples()));
 
 	/* Put the fade out handle so that its right side is at the end-of-fade line;
 	 */
@@ -772,12 +771,13 @@ AudioRegionView::reset_fade_out_shape_width (boost::shared_ptr<AudioRegion> ar, 
 	Points::size_type pi;
 	boost::shared_ptr<const Evoral::ControlList> list (audio_region()->fade_out());
 	Evoral::ControlList::const_iterator x;
-	double length = list->length();
+	double length = list->length().samples();
 
 	points.assign (list->size(), Duple());
 
 	for (x = list->begin(), pi = 0; x != list->end(); ++x, ++pi) {
-		points[pi].x = _pixel_width - pwidth + (pwidth * ((*x)->when/length));
+		const double p = (*x)->when.samples();
+		points[pi].x = _pixel_width - pwidth + (pwidth * (p/length));
 		points[pi].y = effective_height - ((*x)->value * (effective_height - 1.));
 	}
 
@@ -794,13 +794,13 @@ AudioRegionView::reset_fade_out_shape_width (boost::shared_ptr<AudioRegion> ar, 
 samplepos_t
 AudioRegionView::get_fade_in_shape_width ()
 {
-	return audio_region()->fade_in()->back()->when;
+	return audio_region()->fade_in()->back()->when.samples();
 }
 
 samplepos_t
 AudioRegionView::get_fade_out_shape_width ()
 {
-	return audio_region()->fade_out()->back()->when;
+	return audio_region()->fade_out()->back()->when.samples();
 }
 
 
@@ -814,7 +814,7 @@ AudioRegionView::redraw_start_xfade ()
 	}
 
 	show_start_xfade();
-	reset_fade_in_shape_width (ar, ar->fade_in()->back()->when);
+	reset_fade_in_shape_width (ar, ar->fade_in()->back()->when.samples());
 }
 
 void
@@ -878,11 +878,12 @@ AudioRegionView::redraw_start_xfade_to (boost::shared_ptr<AudioRegion> ar, sampl
 
 		Evoral::ControlList::const_iterator x;
 		Points::size_type pi;
-		double length = inverse->length();
+		const double length = inverse->length().samples();
 
 		for (x = inverse->begin(), pi = 0; x != inverse->end(); ++x, ++pi) {
 			ArdourCanvas::Duple& p (ipoints[pi]);
-			p.x = (rect_width * ((*x)->when/length));
+			double pos = (*x)->when.samples();
+			p.x = (rect_width * (pos/length));
 			p.y = effective_height - ((*x)->value * (effective_height));
 		}
 	}
@@ -903,7 +904,7 @@ AudioRegionView::redraw_end_xfade ()
 
 	show_end_xfade();
 
-	reset_fade_out_shape_width (ar, ar->fade_out()->back()->when);
+	reset_fade_out_shape_width (ar, ar->fade_out()->back()->when.samples());
 }
 
 void
@@ -967,15 +968,16 @@ AudioRegionView::redraw_end_xfade_to (boost::shared_ptr<AudioRegion> ar, samplec
 		npoints = inverse->size();
 		ipoints.assign (npoints, Duple());
 
-		const double rend = trackview.editor().sample_to_pixel (_region->length() - width);
+		const double rend = trackview.editor().sample_to_pixel (_region->length_samples() - width);
 
 		Evoral::ControlList::const_iterator x;
 		Points::size_type pi;
-		double length = inverse->length();
+		const double length = inverse->length().samples();
 
 		for (x = inverse->begin(), pi = 0; x != inverse->end(); ++x, ++pi) {
 			ArdourCanvas::Duple& p (ipoints[pi]);
-			p.x = (rect_width * ((*x)->when/length)) + rend;
+			const double pos = (*x)->when.samples();
+			p.x = (rect_width * (pos/length)) + rend;
 			p.y = effective_height - ((*x)->value * (effective_height));
 		}
 	}
@@ -1375,12 +1377,12 @@ AudioRegionView::add_gain_point_event (ArdourCanvas::Item *item, GdkEvent *ev, b
 	/* don't create points that can't be seen */
 
 	update_envelope_visibility ();
-	samplepos_t rpos = region ()->position ();
-	MusicSample snap_pos (trackview.editor().pixel_to_sample (mx) + rpos, 0);
+	samplepos_t rpos = region ()->position_sample();
+	timepos_t snap_pos = timepos_t (trackview.editor().pixel_to_sample (mx) + rpos);
 	trackview.editor ().snap_to_with_modifier (snap_pos, ev);
-	samplepos_t fx = snap_pos.sample - rpos;
+	samplepos_t fx = snap_pos.samples() - rpos;
 
-	if (fx > _region->length()) {
+	if (fx > _region->length_samples()) {
 		return;
 	}
 
@@ -1390,7 +1392,7 @@ AudioRegionView::add_gain_point_event (ArdourCanvas::Item *item, GdkEvent *ev, b
 
 	/* map using gain line */
 
-	gain_line->view_to_model_coord (mx, y);
+	gain_line->view_to_model_coord_y (y);
 
 	/* XXX STATEFUL: can't convert to stateful diff until we
 	   can represent automation data with it.
@@ -1406,7 +1408,7 @@ AudioRegionView::add_gain_point_event (ArdourCanvas::Item *item, GdkEvent *ev, b
 		region_memento = new MementoCommand<AudioRegion>(*(audio_region().get()), &region_before, &region_after);
 	}
 
-	if (audio_region()->envelope()->editor_add (fx, y, with_guard_points)) {
+	if (audio_region()->envelope()->editor_add (timepos_t (fx), y, with_guard_points)) {
 		XMLNode &after = audio_region()->envelope()->get_state();
 		std::list<Selectable*> results;
 
@@ -1418,7 +1420,7 @@ AudioRegionView::add_gain_point_event (ArdourCanvas::Item *item, GdkEvent *ev, b
 
 		trackview.session()->add_command (new MementoCommand<AutomationList>(*audio_region()->envelope().get(), &before, &after));
 
-		gain_line->get_selectables (fx + region ()->position (), fx + region ()->position (), 0.0, 1.0, results);
+		gain_line->get_selectables (region ()->position () + timecnt_t (fx), region ()->position () + timecnt_t (fx), 0.0, 1.0, results);
 		trackview.editor ().get_selection ().set (results);
 
 		trackview.editor ().commit_reversible_command ();
@@ -1444,7 +1446,7 @@ AudioRegionView::add_ghost (TimeAxisView& tv)
 		return 0;
 	}
 
-	double unit_position = _region->position () / samples_per_pixel;
+	double unit_position = _region->position_sample () / samples_per_pixel;
 	AudioGhostRegion* ghost = new AudioGhostRegion (*this, tv, trackview, unit_position);
 	uint32_t nchans;
 
@@ -1467,7 +1469,7 @@ AudioRegionView::add_ghost (TimeAxisView& tv)
 	}
 
 	ghost->set_height ();
-	ghost->set_duration (_region->length() / samples_per_pixel);
+	ghost->set_duration (_region->length_samples() / samples_per_pixel);
 	ghost->set_colors();
 	ghosts.push_back (ghost);
 
@@ -1682,7 +1684,7 @@ AudioRegionView::transients_changed ()
 {
 	AnalysisFeatureList analysis_features;
 	_region->transients (analysis_features);
-	samplepos_t position = _region->position();
+	samplepos_t position = _region->position_sample();
 	samplepos_t first = _region->first_sample();
 	samplepos_t last = _region->last_sample();
 
@@ -1743,7 +1745,7 @@ AudioRegionView::transients_changed ()
 void
 AudioRegionView::update_transient(float /*old_pos*/, float new_pos)
 {
-	/* Find sample at old pos, calulate new sample then update region transients*/
+	/* Find sample at old pos, calculate new sample then update region transients*/
 	list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
 
 	for (l = feature_lines.begin(); l != feature_lines.end(); ++l) {
@@ -1753,7 +1755,7 @@ AudioRegionView::update_transient(float /*old_pos*/, float new_pos)
 		float* pos = (float*) (*l).second->get_data ("position");
 
 		if (rint(new_pos) == rint(*pos)) {
-			samplepos_t position = _region->position();
+			samplepos_t position = _region->position_sample();
 			samplepos_t old_sample = (*l).first;
 			samplepos_t new_sample = trackview.editor().pixel_to_sample (new_pos) + position;
 			_region->update_transient (old_sample, new_sample);
@@ -1768,7 +1770,7 @@ AudioRegionView::remove_transient (float pos)
 	/* this is called from Editor::remove_transient () with pos == get_data ("position")
 	 * which is the item's x-coordinate inside the ARV.
 	 *
-	 * Find sample at old pos, calulate new sample then update region transients
+	 * Find sample at old pos, calculate new sample then update region transients
 	 */
 	list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
 
@@ -1812,7 +1814,7 @@ AudioRegionView::drag_end ()
 	//see comment for drag_start
 
 	if (fade_in_handle && fade_in_handle->visible()) {
-		// lenght of region or fade changed, re-check
+		// length of region or fade changed, re-check
 		// if fade_in_trim_handle or fade_out_trim_handle should
 		// be visible. -- If the fade_in_handle is visible
 		// we have focus and are not in internal edit mode.

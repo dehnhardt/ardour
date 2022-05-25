@@ -20,6 +20,7 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
+
 #include "pbd/error.h"
 
 #include "ardour/amp.h"
@@ -39,6 +40,7 @@
 #include "ardour/monitor_control.h"
 #include "ardour/playlist.h"
 #include "ardour/playlist_factory.h"
+#include "ardour/polarity_processor.h"
 #include "ardour/port.h"
 #include "ardour/processor.h"
 #include "ardour/profile.h"
@@ -50,6 +52,7 @@
 #include "ardour/session_playlists.h"
 #include "ardour/smf_source.h"
 #include "ardour/track.h"
+#include "ardour/triggerbox.h"
 #include "ardour/types_convert.h"
 #include "ardour/utils.h"
 
@@ -85,13 +88,19 @@ Track::~Track ()
 int
 Track::init ()
 {
+	if (!is_auditioner()) {
+		_triggerbox = boost::shared_ptr<TriggerBox> (new TriggerBox (_session, data_type ()));
+		_triggerbox->set_owner (this);
+		_triggerbox->add_midi_sidechain ();
+	}
+
 	if (Route::init ()) {
 		return -1;
 	}
 
 	DiskIOProcessor::Flag dflags = DiskIOProcessor::Recordable;
 
-	_disk_reader.reset (new DiskReader (_session, *this, name(), dflags));
+	_disk_reader.reset (new DiskReader (_session, *this, name(), Config->get_default_automation_time_domain(), dflags));
 	_disk_reader->set_block_size (_session.get_block_size ());
 	_disk_reader->set_owner (this);
 
@@ -99,18 +108,22 @@ Track::init ()
 	_disk_writer->set_block_size (_session.get_block_size ());
 	_disk_writer->set_owner (this);
 
+	/* no triggerbox for the auditioner, to avoid visual clutter in
+	 * patchbays and elsewhere (or special-case code in those places)
+	 */
+
 	set_align_choice_from_io ();
 
 	boost::shared_ptr<Route> rp (boost::dynamic_pointer_cast<Route> (shared_from_this()));
 	boost::shared_ptr<Track> rt = boost::dynamic_pointer_cast<Track> (rp);
 
-	_record_enable_control.reset (new RecordEnableControl (_session, EventTypeMap::instance().to_symbol (RecEnableAutomation), *this));
+	_record_enable_control.reset (new RecordEnableControl (_session, EventTypeMap::instance().to_symbol (RecEnableAutomation), *this, time_domain()));
 	add_control (_record_enable_control);
 
-	_record_safe_control.reset (new RecordSafeControl (_session, EventTypeMap::instance().to_symbol (RecSafeAutomation), *this));
+	_record_safe_control.reset (new RecordSafeControl (_session, EventTypeMap::instance().to_symbol (RecSafeAutomation), *this, time_domain()));
 	add_control (_record_safe_control);
 
-	_monitoring_control.reset (new MonitorControl (_session, EventTypeMap::instance().to_symbol (MonitoringAutomation), *this));
+	_monitoring_control.reset (new MonitorControl (_session, EventTypeMap::instance().to_symbol (MonitoringAutomation), *this, time_domain()));
 	add_control (_monitoring_control);
 
 	if (!name().empty()) {
@@ -151,7 +164,7 @@ Track::chan_count_changed ()
 }
 
 XMLNode&
-Track::state (bool save_template)
+Track::state (bool save_template) const
 {
 	XMLNode& root (Route::state (save_template));
 
@@ -901,6 +914,8 @@ Track::use_captured_midi_sources (SourceList& srcs, CaptureInfos const & capture
 		return;
 	}
 
+	/* There is an assumption here that we have only a single MIDI file */
+
 	boost::shared_ptr<SMFSource> mfs = boost::dynamic_pointer_cast<SMFSource> (srcs.front());
 	boost::shared_ptr<Playlist> pl = _playlists[DataType::MIDI];
 	boost::shared_ptr<MidiRegion> midi_region;
@@ -939,14 +954,14 @@ Track::use_captured_midi_sources (SourceList& srcs, CaptureInfos const & capture
 		plist.add (Properties::name, whole_file_region_name);
 		plist.add (Properties::whole_file, true);
 		plist.add (Properties::automatic, true);
-		plist.add (Properties::start, 0);
-		plist.add (Properties::length, total_capture);
+		plist.add (Properties::start, timecnt_t (Temporal::BeatTime));
+		plist.add (Properties::length, mfs->length());
 		plist.add (Properties::layer, 0);
 
 		boost::shared_ptr<Region> rx (RegionFactory::create (srcs, plist));
 
 		midi_region = boost::dynamic_pointer_cast<MidiRegion> (rx);
-		midi_region->special_set_position (capture_info.front()->start);
+		midi_region->special_set_position (timepos_t (capture_info.front()->start));
 	}
 
 	catch (failed_constructor& err) {
@@ -963,8 +978,8 @@ Track::use_captured_midi_sources (SourceList& srcs, CaptureInfos const & capture
 		initial_capture = capture_info.front()->start;
 	}
 
-	BeatsSamplesConverter converter (_session.tempo_map(), capture_info.front()->start);
 	const samplepos_t preroll_off = _session.preroll_record_trim_len ();
+	const timepos_t cstart (timepos_t (capture_info.front()->start).beats());
 
 	for (ci = capture_info.begin(); ci != capture_info.end(); ++ci) {
 
@@ -983,29 +998,45 @@ Track::use_captured_midi_sources (SourceList& srcs, CaptureInfos const & capture
 
 			/* start of this region is the offset between the start of its capture and the start of the whole pass */
 			samplecnt_t start_off = (*ci)->start - initial_capture + (*ci)->loop_offset;
-			plist.add (Properties::start, start_off);
-			plist.add (Properties::length, (*ci)->samples);
-			plist.add (Properties::length_beats, converter.from((*ci)->samples).to_double());
-			plist.add (Properties::start_beats, converter.from(start_off).to_double());
+			timepos_t s;
+			timecnt_t l;
+
+			if (time_domain() == Temporal::BeatTime) {
+
+				const timepos_t ss (start_off);
+				const timecnt_t ll ((*ci)->samples, ss);
+
+				s = timepos_t (ss.beats());
+				l = timecnt_t (ll.beats(), s);
+
+			} else {
+
+				s = timepos_t (start_off);
+				l = timecnt_t ((*ci)->samples, s);
+			}
+
+			plist.add (Properties::start, s);
+			plist.add (Properties::length, l);
 			plist.add (Properties::name, region_name);
 
 			boost::shared_ptr<Region> rx (RegionFactory::create (srcs, plist));
 			midi_region = boost::dynamic_pointer_cast<MidiRegion> (rx);
 			if (preroll_off > 0) {
-				midi_region->trim_front ((*ci)->start - initial_capture + preroll_off);
+				midi_region->trim_front (timepos_t ((*ci)->start - initial_capture + preroll_off));
 			}
 		}
 
 		catch (failed_constructor& err) {
-			error << _("MidiDiskstream: could not create region for captured midi!") << endmsg;
+			error << string_compose (_("%1: could not create region for captured data!"), name()) << endmsg;
 			continue; /* XXX is this OK? */
 		}
 
-#ifndef NDEBUG
-		cerr << "add new region, len = " << (*ci)->samples << " @ " << (*ci)->start << endl;
-#endif
-
-		pl->add_region (midi_region, (*ci)->start + preroll_off, 1, _session.config.get_layered_record_mode ());
+		if (time_domain() == Temporal::BeatTime) {
+			const timepos_t b ((*ci)->start + preroll_off);
+			pl->add_region (midi_region, timepos_t (b.beats()), 1, _session.config.get_layered_record_mode ());
+		} else {
+			pl->add_region (midi_region, timepos_t ((*ci)->start + preroll_off), 1, _session.config.get_layered_record_mode ());
+		}
 	}
 
 	pl->thaw ();
@@ -1039,15 +1070,15 @@ Track::use_captured_audio_sources (SourceList& srcs, CaptureInfos const & captur
 	try {
 		PropertyList plist;
 
-		plist.add (Properties::start, afs->last_capture_start_sample());
-		plist.add (Properties::length, afs->length(0));
+		plist.add (Properties::start, timecnt_t (afs->last_capture_start_sample(), timepos_t (Temporal::AudioTime)));
+		plist.add (Properties::length, afs->length());
 		plist.add (Properties::name, whole_file_region_name);
 		boost::shared_ptr<Region> rx (RegionFactory::create (srcs, plist));
 		rx->set_automatic (true);
 		rx->set_whole_file (true);
 
 		region = boost::dynamic_pointer_cast<AudioRegion> (rx);
-		region->special_set_position (afs->natural_position());
+		region->special_set_position (timepos_t (afs->natural_position()));
 	}
 
 
@@ -1084,14 +1115,14 @@ Track::use_captured_audio_sources (SourceList& srcs, CaptureInfos const & captur
 
 			PropertyList plist;
 
-			plist.add (Properties::start, buffer_position);
-			plist.add (Properties::length, (*ci)->samples);
+			plist.add (Properties::start, timecnt_t (buffer_position, timepos_t::zero (false)));
+			plist.add (Properties::length, timecnt_t ((*ci)->samples, timepos_t::zero (false)));
 			plist.add (Properties::name, region_name);
 
 			boost::shared_ptr<Region> rx (RegionFactory::create (srcs, plist));
 			region = boost::dynamic_pointer_cast<AudioRegion> (rx);
 			if (preroll_off > 0) {
-				region->trim_front (buffer_position + preroll_off);
+				region->trim_front (timepos_t (buffer_position + preroll_off));
 			}
 		}
 
@@ -1100,7 +1131,7 @@ Track::use_captured_audio_sources (SourceList& srcs, CaptureInfos const & captur
 			continue; /* XXX is this OK? */
 		}
 
-		pl->add_region (region, (*ci)->start + preroll_off, 1, _session.config.get_layered_record_mode());
+		pl->add_region (region, timepos_t ((*ci)->start + preroll_off), 1, _session.config.get_layered_record_mode());
 		pl->set_layer (region, DBL_MAX);
 
 		buffer_position += (*ci)->samples;

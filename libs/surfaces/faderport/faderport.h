@@ -86,7 +86,7 @@ class FaderPort : public ARDOUR::ControlProtocol, public AbstractUI<FaderPortReq
 	static bool probe() { return true; }
 	static void* request_factory (uint32_t);
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	bool has_editor () const { return true; }
@@ -161,6 +161,8 @@ class FaderPort : public ARDOUR::ControlProtocol, public AbstractUI<FaderPortReq
 	std::string get_action (ButtonID, bool on_press, FaderPort::ButtonState = ButtonState (0));
 
 	std::list<boost::shared_ptr<ARDOUR::Bundle> > bundles ();
+
+	CONTROL_PROTOCOL_THREADS_NEED_TEMPO_MAP_DECL();
 
   private:
 	boost::shared_ptr<ARDOUR::Stripable> _current_stripable;

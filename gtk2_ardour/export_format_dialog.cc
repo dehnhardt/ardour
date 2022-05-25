@@ -27,6 +27,8 @@
 #include "ardour/export_format_specification.h"
 #include "ardour/session.h"
 
+#include "temporal/tempo.h"
+
 #include "widgets/tooltips.h"
 
 #include "export_format_dialog.h"
@@ -45,8 +47,8 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog)
 
 	, applying_changes_from_engine (0)
 
-	, name_label (_("Label: "), Gtk::ALIGN_LEFT)
-	, name_generated_part ("", Gtk::ALIGN_LEFT)
+	, name_label (_("Label: "), Gtk::ALIGN_START)
+	, name_generated_part ("", Gtk::ALIGN_START)
 
 	, normalize_checkbox (_("Normalize:"))
 	, normalize_peak_rb (_("Peak"))
@@ -55,9 +57,9 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog)
 	, normalize_lufs_adjustment (-23.0, -90.00, 0.00, 0.1, 1.0)
 	, normalize_dbtp_adjustment ( -1.0, -90.00, 0.00, 0.1, 0.2)
 
-	, normalize_dbfs_label (_("dBFS"), Gtk::ALIGN_LEFT)
-	, normalize_lufs_label (_("LUFS"), Gtk::ALIGN_LEFT)
-	, normalize_dbtp_label (_("dBTP"), Gtk::ALIGN_LEFT)
+	, normalize_dbfs_label (_("dBFS"), Gtk::ALIGN_START)
+	, normalize_lufs_label (_("LUFS"), Gtk::ALIGN_START)
+	, normalize_dbtp_label (_("dBTP"), Gtk::ALIGN_START)
 
 	, silence_table (2, 4)
 	, trim_start_checkbox (_("Trim silence at start"))
@@ -68,32 +70,32 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog)
 	, silence_end_checkbox (_("Add silence at end:"))
 	, silence_end_clock ("silence_end", true, "", true, false, true)
 
-	, command_label (_("Command to run post-export\n(%f=file path, %d=directory, %b=basename, see tooltip for more):"), Gtk::ALIGN_LEFT)
+	, command_label (_("Command to run post-export\n(%f=file path, %d=directory, %b=basename, see tooltip for more):"), Gtk::ALIGN_START)
 
 	, format_table (3, 4)
-	, compatibility_label (_("Compatibility"), Gtk::ALIGN_LEFT)
-	, quality_label (_("Quality"), Gtk::ALIGN_LEFT)
-	, format_label (_("File format"), Gtk::ALIGN_LEFT)
-	, sample_rate_label (_("Sample rate"), Gtk::ALIGN_LEFT)
+	, compatibility_label (_("Compatibility"), Gtk::ALIGN_START)
+	, quality_label (_("Quality"), Gtk::ALIGN_START)
+	, format_label (_("File format"), Gtk::ALIGN_START)
+	, sample_rate_label (_("Sample rate"), Gtk::ALIGN_START)
 
-	, src_quality_label (_("Sample rate conversion quality:"), Gtk::ALIGN_RIGHT)
+	, src_quality_label (_("Sample rate conversion quality:"), Gtk::ALIGN_END)
 
 	/* Watermarking */
-	, watermark_heading (_("Preview / Watermark"), Gtk::ALIGN_LEFT)
+	, watermark_heading (_("Preview / Watermark"), Gtk::ALIGN_START)
 
-	, demo_noise_mode_label (_("Mode:"), Gtk::ALIGN_LEFT)
-	, demo_noise_level_label (_("Noise Level:"), Gtk::ALIGN_LEFT)
-	, demo_noise_dbfs_unit (_("dBFS"), Gtk::ALIGN_LEFT)
+	, demo_noise_mode_label (_("Mode:"), Gtk::ALIGN_START)
+	, demo_noise_level_label (_("Noise Level:"), Gtk::ALIGN_START)
+	, demo_noise_dbfs_unit (_("dBFS"), Gtk::ALIGN_START)
 
 	, demo_noise_dbfs_adjustment (-20.0, -90.00, -6.00, 1, 5)
 	, demo_noise_dbfs_spinbutton (demo_noise_dbfs_adjustment, 1, 0)
 
 	/* Changing encoding options from here on */
-	, encoding_options_label ("", Gtk::ALIGN_LEFT)
+	, encoding_options_label ("", Gtk::ALIGN_START)
 
 	/* Changing encoding options from here on */
-	, sample_format_label (_("Sample Format"), Gtk::ALIGN_LEFT)
-	, dither_label (_("Dithering"), Gtk::ALIGN_LEFT)
+	, sample_format_label (_("Sample Format"), Gtk::ALIGN_START)
+	, dither_label (_("Dithering"), Gtk::ALIGN_START)
 
 	, with_cue (_("Create CUE file for disk-at-once CD/DVD creation"))
 	, with_toc (_("Create TOC file for disk-at-once CD/DVD creation"))
@@ -113,8 +115,8 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog)
 
 	/* Normalize */
 
-	normalize_tp_limiter.append_text (_("limit to"));
-	normalize_tp_limiter.append_text (_("constrain to"));
+	normalize_tp_limiter.append (_("limit to"));
+	normalize_tp_limiter.append (_("constrain to"));
 
 	Gtk::RadioButtonGroup normalize_group = normalize_loudness_rb.get_group ();
 	normalize_peak_rb.set_group (normalize_group);
@@ -644,7 +646,7 @@ ExportFormatDialog::init_format_table ()
 	src_quality_combo.pack_start (src_quality_cols.label);
 	src_quality_combo.set_active (0);
 
-	/* Demo Noise Optoins */
+	/* Demo Noise Options */
 
 	demo_noise_list = Gtk::ListStore::create (demo_noise_cols);
 	demo_noise_combo.set_model (demo_noise_list);
@@ -994,7 +996,7 @@ void
 ExportFormatDialog::update_clock (AudioClock& clock, ARDOUR::AnyTime const& time)
 {
 	// TODO position
-	clock.set (_session->convert_to_samples (time), true);
+	clock.set (timepos_t (_session->convert_to_samples (time)), true);
 
 	AudioClock::Mode mode (AudioClock::Timecode);
 
@@ -1023,26 +1025,26 @@ ExportFormatDialog::update_time (AnyTime& time, AudioClock const& clock)
 		return;
 	}
 
-	samplecnt_t samples = clock.current_duration ();
+	samplecnt_t samples = clock.current_duration().samples();
 
 	switch (clock.mode ()) {
-		case AudioClock::Timecode:
-			time.type = AnyTime::Timecode;
-			_session->timecode_time (samples, time.timecode);
-			break;
-		case AudioClock::BBT:
-			time.type = AnyTime::BBT;
-			_session->bbt_time (samples, time.bbt);
-			break;
-		case AudioClock::Seconds:
-		case AudioClock::MinSec:
-			time.type    = AnyTime::Seconds;
-			time.seconds = (double)samples / _session->sample_rate ();
-			break;
-		case AudioClock::Samples:
-			time.type    = AnyTime::Samples;
-			time.samples = samples;
-			break;
+	case AudioClock::Timecode:
+		time.type = AnyTime::Timecode;
+		_session->timecode_time (samples, time.timecode);
+		break;
+	case AudioClock::BBT:
+		time.type = AnyTime::BBT;
+		time.bbt = Temporal::TempoMap::use()->bbt_at (timepos_t (samples));
+		break;
+	case AudioClock::Seconds:
+	case AudioClock::MinSec:
+		time.type    = AnyTime::Seconds;
+		time.seconds = (double)samples / _session->sample_rate ();
+		break;
+	case AudioClock::Samples:
+		time.type    = AnyTime::Samples;
+		time.samples = samples;
+		break;
 	}
 }
 

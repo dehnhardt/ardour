@@ -71,6 +71,7 @@ namespace ArdourWidgets { namespace ArdourIcon {
 		ConfigReset,
 		PowerOnOff,
 		ShadedPlusSign,
+		Folder,
 		NoIcon //< Last
 	};
 
@@ -83,6 +84,11 @@ namespace ArdourWidgets { namespace ArdourIcon {
 	LIBWIDGETS_API bool expose (GdkEventExpose* ev,
 	                            Gtk::Widget* w,
 	                            const enum Icon icon);
+
+	LIBWIDGETS_API bool expose_with_text (GdkEventExpose* ev,
+	                                      Gtk::Widget* w,
+	                                      const enum Icon icon,
+	                                      std::string const&);
 
 }; } /* end namespace */
 

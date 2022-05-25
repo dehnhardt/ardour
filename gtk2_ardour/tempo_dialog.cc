@@ -28,6 +28,8 @@
 
 #include <gtkmm/stock.h>
 
+#include "pbd/error.h"
+
 #include "gtkmm2ext/utils.h"
 
 #include "tempo_dialog.h"
@@ -40,48 +42,48 @@ using namespace Gtk;
 using namespace Gtkmm2ext;
 using namespace ARDOUR;
 using namespace PBD;
+using namespace Temporal;
 
-TempoDialog::TempoDialog (TempoMap& map, samplepos_t sample, const string&)
+TempoDialog::TempoDialog (TempoMap::SharedPtr const & map, timepos_t const & pos, const string&)
 	: ArdourDialog (_("New Tempo"))
-	, _map (&map)
+	, _map (map)
 	, _section (0)
 	, bpm_adjustment (60.0, 1.0, 999.9, 0.1, 1.0)
 	, bpm_spinner (bpm_adjustment)
 	, end_bpm_adjustment (60.0, 1.0, 999.9, 0.1, 1.0)
 	, end_bpm_spinner (end_bpm_adjustment)
-	, _end_bpm_label (_("End Beats per Minute:"), ALIGN_LEFT, ALIGN_CENTER)
-	, when_bar_label (_("bar:"), ALIGN_RIGHT, ALIGN_CENTER)
-	, when_beat_label (_("beat:"), ALIGN_RIGHT, ALIGN_CENTER)
-	, pulse_selector_label (_("Pulse:"), ALIGN_LEFT, ALIGN_CENTER)
+	, _end_bpm_label (_("End Beats per Minute:"), ALIGN_START, ALIGN_CENTER)
+	, when_bar_label (_("bar:"), ALIGN_END, ALIGN_CENTER)
+	, when_beat_label (_("beat:"), ALIGN_END, ALIGN_CENTER)
+	, pulse_selector_label (_("Pulse:"), ALIGN_START, ALIGN_CENTER)
 	, tap_tempo_button (_("Tap tempo"))
 {
-	Tempo tempo (map.tempo_at_sample (sample));
-	Timecode::BBT_Time when (map.bbt_at_sample (sample));
+	Temporal::BBT_Time when (_map->bbt_at (pos));
+	Tempo const & tempo (_map->tempo_at (pos));
 
-	init (when, tempo.note_types_per_minute(), tempo.end_note_types_per_minute(), tempo.note_type(), TempoSection::Constant, true, MusicTime);
+	init (when, tempo.note_types_per_minute(), tempo.end_note_types_per_minute(), tempo.note_type(), Tempo::Constant, true, BeatTime);
 }
 
-TempoDialog::TempoDialog (TempoMap& map, TempoSection& section, const string&)
+TempoDialog::TempoDialog (TempoMap::SharedPtr const & map, TempoPoint& point, const string&)
 	: ArdourDialog (_("Edit Tempo"))
-	, _map (&map)
-	, _section (&section)
+	, _map (map)
+	, _section (&point)
 	, bpm_adjustment (60.0, 1.0, 999.9, 0.1, 1.0)
 	, bpm_spinner (bpm_adjustment)
 	, end_bpm_adjustment (60.0, 1.0, 999.9, 0.1, 1.0)
 	, end_bpm_spinner (end_bpm_adjustment)
-	, _end_bpm_label (_("End Beats per Minute:"), ALIGN_LEFT, ALIGN_CENTER)
-	, when_bar_label (_("bar:"), ALIGN_RIGHT, ALIGN_CENTER)
-	, when_beat_label (_("beat:"), ALIGN_RIGHT, ALIGN_CENTER)
-	, pulse_selector_label (_("Pulse:"), ALIGN_LEFT, ALIGN_CENTER)
+	, _end_bpm_label (_("End Beats per Minute:"), ALIGN_START, ALIGN_CENTER)
+	, when_bar_label (_("bar:"), ALIGN_END, ALIGN_CENTER)
+	, when_beat_label (_("beat:"), ALIGN_END, ALIGN_CENTER)
+	, pulse_selector_label (_("Pulse:"), ALIGN_START, ALIGN_CENTER)
 	, tap_tempo_button (_("Tap tempo"))
 {
-	Timecode::BBT_Time when (map.bbt_at_sample (section.sample()));
-	init (when, section.note_types_per_minute(), section.end_note_types_per_minute(), section.note_type(), section.type()
-	      , section.initial() || section.locked_to_meter(), section.position_lock_style());
+	Temporal::BBT_Time when (map->bbt_at (point.time()));
+	init (when, _section->note_types_per_minute(), _section->end_note_types_per_minute(), _section->note_type(), _section->type(), map->is_initial (point), Temporal::BeatTime);
 }
 
 void
-TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double end_bpm, double note_type, TempoSection::Type type, bool initial, PositionLockStyle style)
+TempoDialog::init (const Temporal::BBT_Time& when, double bpm, double end_bpm, double note_type, Tempo::Type type, bool initial, TimeDomain style)
 {
 	vector<string> strings;
 	NoteTypes::iterator x;
@@ -100,23 +102,23 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double end_bpm, d
 
 	Gtkmm2ext::set_size_request_to_display_given_text (pulse_selector, _("one-hundred-twenty-eighth"), 3, 6);
 
-	note_types.insert (make_pair (_("whole"), 1.0));
+	note_types.insert (make_pair (_("whole"), 1));
 	strings.push_back (_("whole"));
-	note_types.insert (make_pair (_("second"), 2.0));
+	note_types.insert (make_pair (_("second"), 2));
 	strings.push_back (_("second"));
-	note_types.insert (make_pair (_("third"), 3.0));
+	note_types.insert (make_pair (_("third"), 3));
 	strings.push_back (_("third"));
-	note_types.insert (make_pair (_("quarter"), 4.0));
+	note_types.insert (make_pair (_("quarter"), 4));
 	strings.push_back (_("quarter"));
-	note_types.insert (make_pair (_("eighth"), 8.0));
+	note_types.insert (make_pair (_("eighth"), 8));
 	strings.push_back (_("eighth"));
-	note_types.insert (make_pair (_("sixteenth"), 16.0));
+	note_types.insert (make_pair (_("sixteenth"), 16));
 	strings.push_back (_("sixteenth"));
-	note_types.insert (make_pair (_("thirty-second"), 32.0));
+	note_types.insert (make_pair (_("thirty-second"), 32));
 	strings.push_back (_("thirty-second"));
-	note_types.insert (make_pair (_("sixty-fourth"), 64.0));
+	note_types.insert (make_pair (_("sixty-fourth"), 64));
 	strings.push_back (_("sixty-fourth"));
-	note_types.insert (make_pair (_("one-hundred-twenty-eighth"), 128.0));
+	note_types.insert (make_pair (_("one-hundred-twenty-eighth"), 128));
 	strings.push_back (_("one-hundred-twenty-eighth"));
 
 	set_popdown_strings (pulse_selector, strings);
@@ -134,9 +136,9 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double end_bpm, d
 
 	strings.clear();
 
-	tempo_types.insert (make_pair (_("ramped"), TempoSection::Ramp));
+	tempo_types.insert (make_pair (_("ramped"), Tempo::Ramped));
 	strings.push_back (_("ramped"));
-	tempo_types.insert (make_pair (_("constant"), TempoSection::Constant));
+	tempo_types.insert (make_pair (_("constant"), Tempo::Constant));
 	strings.push_back (_("constant"));
 	set_popdown_strings (tempo_type, strings);
 	TempoTypes::iterator tt;
@@ -152,7 +154,7 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double end_bpm, d
 
 	strings.clear();
 
-	lock_styles.insert (make_pair (_("music"), MusicTime));
+	lock_styles.insert (make_pair (_("music"), BeatTime));
 	strings.push_back (_("music"));
 	lock_styles.insert (make_pair (_("audio"), AudioTime));
 	strings.push_back (_("audio"));
@@ -188,7 +190,7 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double end_bpm, d
 		++row;
 	}
 
-	Label* bpm_label = manage (new Label(_("Start Beats per Minute:"), ALIGN_LEFT, ALIGN_CENTER));
+	Label* bpm_label = manage (new Label(_("Start Beats per Minute:"), ALIGN_START, ALIGN_CENTER));
 	table->attach (*bpm_label, 0, 1, row, row + 1);
 	table->attach (bpm_spinner, 1, 5, row, row + 1);
 	++row;
@@ -197,7 +199,7 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double end_bpm, d
 	table->attach (end_bpm_spinner, 1, 5, row, row + 1);
 	++row;
 
-	Label* tempo_type_label = manage (new Label(_("Tempo Type:"), ALIGN_LEFT, ALIGN_CENTER));
+	Label* tempo_type_label = manage (new Label(_("Tempo Type:"), ALIGN_START, ALIGN_CENTER));
 	table->attach (*tempo_type_label, 0, 1, row, row + 1);
 	table->attach (tempo_type, 1, 5, row, row + 1);
 
@@ -225,13 +227,13 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double end_bpm, d
 		table->attach (when_beat_label, 3, 4, row, row+1, Gtk::AttachOptions(0), Gtk::AttachOptions(0));
 		table->attach (when_beat_entry, 4, 5, row, row+1, Gtk::AttachOptions(0), Gtk::AttachOptions(0));
 
-		Label* when_label = manage (new Label(_("Tempo begins at"), ALIGN_LEFT, ALIGN_CENTER));
+		Label* when_label = manage (new Label(_("Tempo begins at"), ALIGN_START, ALIGN_CENTER));
 		table->attach (*when_label, 0, 1, row, row+1);
 
 		++row;
 		++row;
 
-		Label* lock_style_label = manage (new Label(_("Lock Style:"), ALIGN_LEFT, ALIGN_CENTER));
+		Label* lock_style_label = manage (new Label(_("Lock Style:"), ALIGN_START, ALIGN_CENTER));
 		table->attach (*lock_style_label, 0, 1, row, row + 1);
 		table->attach (lock_style, 1, 5, row, row + 1);
 
@@ -253,7 +255,7 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double end_bpm, d
 	tap_tempo_button.show ();
 	get_vbox()->set_spacing (6);
 	get_vbox()->pack_end (tap_tempo_button);
-	tap_tempo_button.can_focus ();
+	tap_tempo_button.set_can_focus ();
 	tap_tempo_button.grab_focus ();
 
 	set_name ("MetricDialog");
@@ -314,13 +316,10 @@ TempoDialog::bpm_button_release (GdkEventButton*)
 bool
 TempoDialog::entry_key_release (GdkEventKey*)
 {
-	Timecode::BBT_Time bbt;
-	get_bbt_time (bbt);
-
-	if (_section && is_user_input_valid()) {
-		set_response_sensitive (RESPONSE_ACCEPT, _map->can_solve_bbt (_section, bbt));
+	if (is_user_input_valid()) {
+		set_response_sensitive (RESPONSE_ACCEPT, true);
 	} else {
-		set_response_sensitive (RESPONSE_ACCEPT, is_user_input_valid());
+		set_response_sensitive (RESPONSE_ACCEPT, false);
 	}
 
 	return false;
@@ -335,7 +334,7 @@ TempoDialog::get_bpm ()
 double
 TempoDialog::get_end_bpm ()
 {
-	if (get_tempo_type() == TempoSection::Constant) {
+	if (get_tempo_type() == Tempo::Constant) {
 		return bpm_spinner.get_value ();
 	}
 
@@ -343,7 +342,7 @@ TempoDialog::get_end_bpm ()
 }
 
 bool
-TempoDialog::get_bbt_time (Timecode::BBT_Time& requested)
+TempoDialog::get_bbt_time (Temporal::BBT_Time& requested)
 {
 	if (sscanf (when_bar_entry.get_text().c_str(), "%" PRIu32, &requested.bars) != 1) {
 		return false;
@@ -358,7 +357,7 @@ TempoDialog::get_bbt_time (Timecode::BBT_Time& requested)
 	return true;
 }
 
-double
+int
 TempoDialog::get_note_type ()
 {
 	NoteTypes::iterator x = note_types.find (pulse_selector.get_active_text());
@@ -371,27 +370,27 @@ TempoDialog::get_note_type ()
 	return x->second;
 }
 
-TempoSection::Type
+Tempo::Type
 TempoDialog::get_tempo_type ()
 {
 	TempoTypes::iterator x = tempo_types.find (tempo_type.get_active_text());
 
 	if (x == tempo_types.end()) {
 		error << string_compose(_("incomprehensible tempo type (%1)"), tempo_type.get_active_text()) << endmsg;
-		return TempoSection::Constant;
+		return Tempo::Constant;
 	}
 
 	return x->second;
 }
 
-PositionLockStyle
+TimeDomain
 TempoDialog::get_lock_style ()
 {
 	LockStyles::iterator x = lock_styles.find (lock_style.get_active_text());
 
 	if (x == lock_styles.end()) {
 		error << string_compose(_("incomprehensible lock style (%1)"), lock_style.get_active_text()) << endmsg;
-		return MusicTime;
+		return BeatTime;
 	}
 
 	return x->second;
@@ -406,7 +405,7 @@ TempoDialog::pulse_change ()
 void
 TempoDialog::tempo_type_change ()
 {
-	if (get_tempo_type() == TempoSection::Constant) {
+	if (get_tempo_type() == Tempo::Constant) {
 		end_bpm_spinner.hide ();
 		_end_bpm_label.hide();
 	} else {
@@ -487,26 +486,23 @@ TempoDialog::tap_tempo_focus_out (GdkEventFocus* )
 	return false;
 }
 
-MeterDialog::MeterDialog (TempoMap& map, samplepos_t sample, const string&)
-	: ArdourDialog (_("New Meter"))
+MeterDialog::MeterDialog (TempoMap::SharedPtr const & map, timepos_t const & pos, const string&)
+	: ArdourDialog (_("New Time Signature"))
 {
-	sample = map.round_to_bar(sample, RoundNearest).sample;
-	Timecode::BBT_Time when (map.bbt_at_sample (sample));
-	Meter meter (map.meter_at_sample (sample));
+	Temporal::BBT_Time when (map->round_to_bar (map->bbt_at (pos)));
+	Meter const & meter (map->meter_at (when));
 
-	init (when, meter.divisions_per_bar(), meter.note_divisor(), false, MusicTime);
+	init (when, meter.divisions_per_bar(), meter.note_value(), false, pos.time_domain());
 }
 
-MeterDialog::MeterDialog (TempoMap& map, MeterSection& section, const string&)
-	: ArdourDialog (_("Edit Meter"))
+MeterDialog::MeterDialog (Temporal::MeterPoint& section, const string&)
+	: ArdourDialog (_("Edit Time Signature"))
 {
-	Timecode::BBT_Time when (map.bbt_at_sample (section.sample()));
-
-	init (when, section.divisions_per_bar(), section.note_divisor(), section.initial(), section.position_lock_style());
+	init (section.bbt(), section.divisions_per_bar(), section.note_value(), section.map().is_initial(section), Temporal::BeatTime);
 }
 
 void
-MeterDialog::init (const Timecode::BBT_Time& when, double bpb, double divisor, bool initial, PositionLockStyle style)
+MeterDialog::init (const Temporal::BBT_Time& when, double bpb, double divisor, bool initial, TimeDomain style)
 {
 	char buf[64];
 	vector<string> strings;
@@ -517,23 +513,23 @@ MeterDialog::init (const Timecode::BBT_Time& when, double bpb, double divisor, b
 	bpb_entry.select_region (0, -1);
 	bpb_entry.set_alignment (1.0);
 
-	note_types.insert (make_pair (_("whole"), 1.0));
+	note_types.insert (make_pair (_("whole"), 1));
 	strings.push_back (_("whole"));
-	note_types.insert (make_pair (_("second"), 2.0));
+	note_types.insert (make_pair (_("second"), 2));
 	strings.push_back (_("second"));
-	note_types.insert (make_pair (_("third"), 3.0));
+	note_types.insert (make_pair (_("third"), 3));
 	strings.push_back (_("third"));
-	note_types.insert (make_pair (_("quarter"), 4.0));
+	note_types.insert (make_pair (_("quarter"), 4));
 	strings.push_back (_("quarter"));
-	note_types.insert (make_pair (_("eighth"), 8.0));
+	note_types.insert (make_pair (_("eighth"), 8));
 	strings.push_back (_("eighth"));
-	note_types.insert (make_pair (_("sixteenth"), 16.0));
+	note_types.insert (make_pair (_("sixteenth"), 16));
 	strings.push_back (_("sixteenth"));
-	note_types.insert (make_pair (_("thirty-second"), 32.0));
+	note_types.insert (make_pair (_("thirty-second"), 32));
 	strings.push_back (_("thirty-second"));
-	note_types.insert (make_pair (_("sixty-fourth"), 64.0));
+	note_types.insert (make_pair (_("sixty-fourth"), 64));
 	strings.push_back (_("sixty-fourth"));
-	note_types.insert (make_pair (_("one-hundred-twenty-eighth"), 128.0));
+	note_types.insert (make_pair (_("one-hundred-twenty-eighth"), 128));
 	strings.push_back (_("one-hundred-twenty-eighth"));
 
 	set_popdown_strings (note_type, strings);
@@ -551,7 +547,7 @@ MeterDialog::init (const Timecode::BBT_Time& when, double bpb, double divisor, b
 
 	strings.clear();
 
-	lock_styles.insert (make_pair (_("music"), MusicTime));
+	lock_styles.insert (make_pair (_("music"), BeatTime));
 	strings.push_back (_("music"));
 	lock_styles.insert (make_pair (_("audio"), AudioTime));
 	strings.push_back (_("audio"));
@@ -567,9 +563,9 @@ MeterDialog::init (const Timecode::BBT_Time& when, double bpb, double divisor, b
 		lock_style.set_active_text (strings[0]); // "music"
 	}
 
-	Label* note_label = manage (new Label (_("Note value:"), ALIGN_RIGHT, ALIGN_CENTER));
-	Label* lock_label = manage (new Label (_("Lock style:"), ALIGN_RIGHT, ALIGN_CENTER));
-	Label* bpb_label = manage (new Label (_("Beats per bar:"), ALIGN_RIGHT, ALIGN_CENTER));
+	Label* note_label = manage (new Label (_("Note value:"), ALIGN_END, ALIGN_CENTER));
+	Label* lock_label = manage (new Label (_("Lock style:"), ALIGN_END, ALIGN_CENTER));
+	Label* bpb_label = manage (new Label (_("Beats per bar:"), ALIGN_END, ALIGN_CENTER));
 	Table* table = manage (new Table (3, 3));
 	table->set_spacings (6);
 
@@ -583,7 +579,7 @@ MeterDialog::init (const Timecode::BBT_Time& when, double bpb, double divisor, b
 	when_bar_entry.set_alignment (1.0);
 
 	if (!initial) {
-		Label* when_label = manage (new Label(_("Meter begins at bar:"), ALIGN_LEFT, ALIGN_CENTER));
+		Label* when_label = manage (new Label(_("Time Signature begins at bar:"), ALIGN_START, ALIGN_CENTER));
 
 		table->attach (*when_label, 0, 1, 2, 3, FILL | EXPAND, FILL | EXPAND);
 		table->attach (when_bar_entry, 1, 2, 2, 3, FILL | EXPAND, FILL | EXPAND);
@@ -701,34 +697,34 @@ MeterDialog::get_bpb ()
 	return bpb;
 }
 
-double
+int
 MeterDialog::get_note_type ()
 {
 	NoteTypes::iterator x = note_types.find (note_type.get_active_text());
 
 	if (x == note_types.end()) {
-		error << string_compose(_("incomprehensible meter note type (%1)"), note_type.get_active_text()) << endmsg;
+		error << string_compose(_("incomprehensible time signature denominator (%1)"), note_type.get_active_text()) << endmsg;
 		return 0;
 	}
 
 	return x->second;
 }
 
-PositionLockStyle
+TimeDomain
 MeterDialog::get_lock_style ()
 {
 	LockStyles::iterator x = lock_styles.find (lock_style.get_active_text());
 
 	if (x == lock_styles.end()) {
-		error << string_compose(_("incomprehensible meter lock style (%1)"), lock_style.get_active_text()) << endmsg;
-		return MusicTime;
+		error << string_compose(_("incomprehensible lock style (%1)"), lock_style.get_active_text()) << endmsg;
+		return BeatTime;
 	}
 
 	return x->second;
 }
 
 bool
-MeterDialog::get_bbt_time (Timecode::BBT_Time& requested)
+MeterDialog::get_bbt_time (Temporal::BBT_Time& requested)
 {
 	if (sscanf (when_bar_entry.get_text().c_str(), "%" PRIu32, &requested.bars) != 1) {
 		return false;

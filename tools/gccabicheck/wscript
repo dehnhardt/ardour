@@ -13,14 +13,13 @@ def options(opt):
     autowaf.set_options(opt)
 
 def configure(conf):
-    conf.load('compiler_c')
-    autowaf.configure(conf)
+    pass
 
 def build(bld):
     obj = bld(features = 'c cprogram')
     obj.source = [ 'abicheck.c' ]
     obj.target = 'gcc-glibmm-abi-check'
     obj.name = 'gcc-glibmm-abi-check'
-    if re.search ("bsd", sys.platform) == None:
+    if re.search ("bsd", sys.platform) is None:
         obj.lib = 'dl'
     obj.install_path = None

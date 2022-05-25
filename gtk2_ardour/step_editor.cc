@@ -34,13 +34,14 @@
 using namespace ARDOUR;
 using namespace Gtk;
 using namespace std;
+using namespace Temporal;
 
 StepEditor::StepEditor (PublicEditor& e, boost::shared_ptr<MidiTrack> t, MidiTimeAxisView& mtv)
 	: _editor (e)
 	, _track (t)
 	, _mtv (mtv)
 {
-	step_edit_insert_position = 0;
+	step_edit_insert_position = timepos_t (Temporal::BeatTime);
 	_step_edit_triplet_countdown = 0;
 	_step_edit_within_chord = 0;
 	_step_edit_chord_duration = Temporal::Beats();
@@ -115,13 +116,9 @@ StepEditor::prepare_step_edit_region ()
 
 	} else {
 
-		const Meter& m = _mtv.session()->tempo_map().meter_at_sample (step_edit_insert_position);
-		double baf = max (0.0, _mtv.session()->tempo_map().beat_at_sample (step_edit_insert_position));
-		double next_bar_in_beats =  baf + m.divisions_per_bar();
-		samplecnt_t next_bar_pos = _mtv.session()->tempo_map().sample_at_beat (next_bar_in_beats);
-		samplecnt_t len = next_bar_pos - step_edit_insert_position;
-
-		step_edit_region = _mtv.add_region (step_edit_insert_position, len, true);
+		const Meter& m = Temporal::TempoMap::use()->meter_at (step_edit_insert_position);
+		/* 1 bar long region */
+		step_edit_region = _mtv.add_region (step_edit_insert_position, timecnt_t (Beats::beats (m.divisions_per_bar()), step_edit_insert_position), true);
 
 		RegionView* rv = _mtv.midi_view()->find_view (step_edit_region);
 		step_edit_region_view = dynamic_cast<MidiRegionView*>(rv);
@@ -135,16 +132,17 @@ StepEditor::reset_step_edit_beat_pos ()
 	assert (step_edit_region);
 	assert (step_edit_region_view);
 
-	samplecnt_t samples_from_start = _editor.get_preferred_edit_position() - step_edit_region->position();
+	const timepos_t ep = _editor.get_preferred_edit_position();
+	timecnt_t distance_from_start (step_edit_region->position().distance (ep));
 
-	if (samples_from_start < 0) {
+	if (distance_from_start.is_negative()) {
 		/* this can happen with snap enabled, and the edit point == Playhead. we snap the
 		   position of the new region, and it can end up after the edit point.
 		*/
-		samples_from_start = 0;
+		distance_from_start = timecnt_t (ep.time_domain());
 	}
 
-	step_edit_beat_pos = step_edit_region_view->region_samples_to_region_beats (samples_from_start);
+	step_edit_beat_pos = distance_from_start.beats();
 	step_edit_region_view->move_step_edit_cursor (step_edit_beat_pos);
 }
 
@@ -238,16 +236,19 @@ StepEditor::move_step_edit_beat_pos (Temporal::Beats beats)
 	if (!step_edit_region_view) {
 		return;
 	}
-	if (beats > 0.0) {
-		step_edit_beat_pos = min (step_edit_beat_pos + beats,
-		                          step_edit_region_view->region_samples_to_region_beats (step_edit_region->length()));
-	} else if (beats < 0.0) {
+
+	const Temporal::Beats zero;
+
+	if (beats > zero) {
+		step_edit_beat_pos = min (step_edit_beat_pos + beats, step_edit_region->length().beats());
+	} else if (beats < zero) {
 		if (-beats < step_edit_beat_pos) {
 			step_edit_beat_pos += beats; // its negative, remember
 		} else {
 			step_edit_beat_pos = Temporal::Beats();
 		}
 	}
+
 	step_edit_region_view->move_step_edit_cursor (step_edit_beat_pos);
 }
 
@@ -271,7 +272,7 @@ StepEditor::step_add_note (uint8_t channel, uint8_t pitch, uint8_t velocity, Tem
 		beat_duration = StepEntry::instance().note_length();
 	} else if (beat_duration == 0.0) {
 		bool success;
-		beat_duration = _editor.get_grid_type_as_beats (success, step_edit_insert_position);
+		beat_duration = _editor.get_draw_length_as_beats (success, step_edit_insert_position);
 
 		if (!success) {
 			return -1;
@@ -289,10 +290,10 @@ StepEditor::step_add_note (uint8_t channel, uint8_t pitch, uint8_t velocity, Tem
 
 	/* make sure its visible on the horizontal axis */
 
-	samplepos_t fpos = step_edit_region_view->region_beats_to_absolute_samples (step_edit_beat_pos + beat_duration);
+	timepos_t fpos = step_edit_region_view->region()->region_beats_to_absolute_time (step_edit_beat_pos + beat_duration);
 
 	if (fpos >= (_editor.leftmost_sample() + _editor.current_page_samples())) {
-		_editor.reset_x_origin (fpos - (_editor.current_page_samples()/4));
+		_editor.reset_x_origin (fpos.samples() - (_editor.current_page_samples()/4));
 	}
 
 	Temporal::Beats at = step_edit_beat_pos;
@@ -386,7 +387,7 @@ StepEditor::step_edit_rest (Temporal::Beats beats)
 	bool success;
 
 	if (beats == 0.0) {
-		beats = _editor.get_grid_type_as_beats (success, step_edit_insert_position);
+		beats = _editor.get_draw_length_as_beats (success, step_edit_insert_position);
 	} else {
 		success = true;
 	}
@@ -415,9 +416,15 @@ StepEditor::step_edit_bar_sync ()
 		return;
 	}
 
-	samplepos_t fpos = step_edit_region_view->region_beats_to_absolute_samples (step_edit_beat_pos);
-	fpos = _session->tempo_map().round_to_bar (fpos, RoundUpAlways).sample;
-	step_edit_beat_pos = step_edit_region_view->region_samples_to_region_beats (fpos - step_edit_region->position()).round_up_to_beat();
+	timepos_t pos = step_edit_region_view->region()->region_beats_to_absolute_time (step_edit_beat_pos);
+
+	/* have to go to BBT to round up to bar, unfortunately */
+	TempoMap::SharedPtr tmap (TempoMap::use());
+	BBT_Time bbt (tmap->bbt_at (pos).round_up_to_bar ());
+
+	/* now back to beats */
+	pos = timepos_t (tmap->quarters_at (bbt));
+	step_edit_beat_pos = step_edit_region->position().distance (pos).beats().round_up_to_beat();
 	step_edit_region_view->move_step_edit_cursor (step_edit_beat_pos);
 }
 
@@ -443,7 +450,7 @@ StepEditor::region_removed (boost::weak_ptr<Region> wr)
 		step_edit_region.reset();
 		step_edit_region_view = 0;
 		// force a recompute of the insert position
-		step_edit_beat_pos = Temporal::Beats(-1);
+		step_edit_beat_pos = Temporal::Beats::from_double (-1);
 	}
 }
 

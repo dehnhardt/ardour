@@ -571,7 +571,7 @@ MidiTimeAxisView::update_midi_controls_visibility (uint32_t h)
 }
 
 void
-MidiTimeAxisView::set_height (uint32_t h, TrackHeightMode m)
+MidiTimeAxisView::set_height (uint32_t h, TrackHeightMode m, bool from_idle)
 {
 	update_midi_controls_visibility (h);
 
@@ -581,28 +581,57 @@ MidiTimeAxisView::set_height (uint32_t h, TrackHeightMode m)
 		_midi_controls_box.hide();
 	}
 
-	if (h >= KEYBOARD_MIN_HEIGHT) {
-		if (is_track() && _range_scroomer) {
-			_range_scroomer->show();
-		}
-		if (is_track() && _piano_roll_header) {
-			_piano_roll_header->show();
-		}
-	} else {
-		if (is_track() && _range_scroomer) {
-			_range_scroomer->hide();
-		}
-		if (is_track() && _piano_roll_header) {
-			_piano_roll_header->hide();
-		}
-	}
+	update_scroomer_visbility (h, layer_display ());
 
 	/* We need to do this after changing visibility of our stuff, as it will
 	 * eventually trigger a call to Editor::reset_controls_layout_width(),
 	 * which needs to know if we have just shown or hidden a scroomer /
 	 * piano roll.
 	 */
-	RouteTimeAxisView::set_height (h, m);
+	RouteTimeAxisView::set_height (h, m, from_idle);
+}
+
+void
+MidiTimeAxisView::update_scroomer_visbility (uint32_t h, LayerDisplay d)
+{
+	if (!is_track ()) {
+		return;
+	}
+	if (h >= KEYBOARD_MIN_HEIGHT && d == Overlaid) {
+		if (_range_scroomer) {
+			_range_scroomer->show();
+		}
+		if (_piano_roll_header) {
+			_piano_roll_header->show();
+		}
+	} else {
+		if (_range_scroomer) {
+			_range_scroomer->hide();
+		}
+		if (_piano_roll_header) {
+			_piano_roll_header->hide();
+		}
+	}
+}
+
+void
+MidiTimeAxisView::set_layer_display (LayerDisplay d)
+{
+	LayerDisplay prev_layer_display = layer_display ();
+	RouteTimeAxisView::set_layer_display (d);
+	LayerDisplay curr_layer_display = layer_display ();
+
+	if (curr_layer_display == prev_layer_display) {
+		return;
+	}
+
+	uint32_t h = current_height ();
+	update_scroomer_visbility (h, curr_layer_display);
+
+	/* If visibility changed, trigger a call to Editor::reset_controls_layout_width()
+	 * by forcing a redraw via Editor::queue_redisplay_track_views ()
+	 */
+	_stripable->gui_changed ("visible_tracks", (void *) 0); /* EMIT SIGNAL */
 }
 
 void
@@ -1217,7 +1246,7 @@ MidiTimeAxisView::show_all_automation (bool apply_to_selection)
 
 		md.set_title (_("Show All Automation"));
 
-		md.set_secondary_text (_("There are a total of 16 MIDI channels times 128 Control-Change parameters, not including other MIDI controls. Showing all will add more than 2000 automation lanes which is not generally useful. This will take some time and also slow down the GUI signficantly."));
+		md.set_secondary_text (_("There are a total of 16 MIDI channels times 128 Control-Change parameters, not including other MIDI controls. Showing all will add more than 2000 automation lanes which is not generally useful. This will take some time and also slow down the GUI significantly."));
 		if (md.run () != RESPONSE_YES) {
 			return;
 		}
@@ -1640,29 +1669,54 @@ MidiTimeAxisView::automation_child_menu_item (Evoral::Parameter param)
 }
 
 boost::shared_ptr<MidiRegion>
-MidiTimeAxisView::add_region (samplepos_t f, samplecnt_t length, bool commit)
+MidiTimeAxisView::add_region (timepos_t const & f, timecnt_t const & length, bool commit)
 {
 	Editor* real_editor = dynamic_cast<Editor*> (&_editor);
-	MusicSample pos (f, 0);
+	timepos_t pos (f);
 
 	if (commit) {
 		real_editor->begin_reversible_command (Operations::create_region);
 	}
 	playlist()->clear_changes ();
 
-	real_editor->snap_to (pos, RoundNearest);
+	real_editor->snap_to (pos, Temporal::RoundNearest);
 
 	boost::shared_ptr<Source> src = _session->create_midi_source_by_stealing_name (view()->trackview().track());
-	PropertyList plist;
 
-	plist.add (ARDOUR::Properties::start, 0);
-	plist.add (ARDOUR::Properties::length, length);
-	plist.add (ARDOUR::Properties::name, PBD::basename_nosuffix(src->name()));
+	const Temporal::timecnt_t start (Temporal::BeatTime); /* zero beats */
 
-	boost::shared_ptr<Region> region = (RegionFactory::create (src, plist));
-	/* sets beat position */
-	region->set_position (pos.sample, pos.division);
-	playlist()->add_region (region, pos.sample, 1.0, false, pos.division);
+	boost::shared_ptr<Region> region;
+
+	/* Create the (empty) whole-file region that will show up in the source
+	 * list. This is NOT used in any playlists.
+	 */
+
+	{
+		PropertyList plist;
+
+		plist.add (ARDOUR::Properties::start, start);
+		plist.add (ARDOUR::Properties::length, length);
+		plist.add (ARDOUR::Properties::automatic, true);
+		plist.add (ARDOUR::Properties::whole_file, true);
+		plist.add (ARDOUR::Properties::name, PBD::basename_nosuffix(src->name()));
+
+		region = (RegionFactory::create (src, plist, true));
+	}
+
+	/* Now create the region that we will actually use within the playlist */
+
+	{
+		PropertyList plist;
+
+		plist.add (ARDOUR::Properties::start, start);
+		plist.add (ARDOUR::Properties::length, length);
+		plist.add (ARDOUR::Properties::name, region->name());
+
+		region = RegionFactory::create (region, plist, false);
+	}
+
+	region->set_position (pos);
+	playlist()->add_region (region, pos, 1.0, false);
 	_session->add_command (new StatefulDiffCommand (playlist()));
 
 	if (commit) {
@@ -1699,8 +1753,12 @@ MidiTimeAxisView::stop_step_editing ()
  *  of the channel selector.
  */
 uint8_t
-MidiTimeAxisView::get_channel_for_add () const
+MidiTimeAxisView::get_preferred_midi_channel () const
 {
+	if (_editor.draw_channel() != Editing::DRAW_CHAN_AUTO) {
+		return _editor.draw_channel();
+	}
+
 	uint16_t const chn_mask = midi_track()->get_playback_channel_mask();
 	int chn_cnt = 0;
 	uint8_t channel = 0;
@@ -1737,14 +1795,14 @@ MidiTimeAxisView::contents_height_changed ()
 }
 
 bool
-MidiTimeAxisView::paste (samplepos_t pos, const Selection& selection, PasteContext& ctx, const int32_t sub_num)
+MidiTimeAxisView::paste (timepos_t const & pos, const Selection& selection, PasteContext& ctx)
 {
 	if (!_editor.internal_editing()) {
 		// Non-internal paste, paste regions like any other route
-		return RouteTimeAxisView::paste(pos, selection, ctx, sub_num);
+		return RouteTimeAxisView::paste (pos, selection, ctx);
 	}
 
-	return midi_view()->paste(pos, selection, ctx, sub_num);
+	return midi_view()->paste (pos, selection, ctx);
 }
 
 void

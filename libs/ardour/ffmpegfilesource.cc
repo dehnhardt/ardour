@@ -33,7 +33,7 @@ FFMPEGFileSource::FFMPEGFileSource (Session& s, const std::string& path, int chn
 			Source::Flag (flags & ~(Writable|Removable|RemovableIfEmpty|RemoveAtDestroy)))
 	, _ffmpeg (path, chn)
 {
-	_length = _ffmpeg.length ();
+	_length = timecnt_t (_ffmpeg.length ());
 }
 
 FFMPEGFileSource::~FFMPEGFileSource ()
@@ -85,7 +85,8 @@ FFMPEGFileSource::safe_audio_file_extension (const std::string &file)
 	};
 
 	for (size_t n = 0; n < sizeof(suffixes) / sizeof(suffixes[0]); ++n) {
-		if (file.rfind(suffixes[n]) == file.length() - strlen(suffixes[n])) {
+		size_t pos = file.rfind (suffixes[n]);
+		if (pos > 0 && pos == file.length() - strlen(suffixes[n])) {
 			return true;
 		}
 	}

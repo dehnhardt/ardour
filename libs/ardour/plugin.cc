@@ -541,7 +541,7 @@ Plugin::set_state (const XMLNode& node, int /*version*/)
 }
 
 XMLNode &
-Plugin::get_state ()
+Plugin::get_state () const
 {
 	XMLNode* root = new XMLNode (state_node_name ());
 
@@ -592,5 +592,5 @@ PluginInfo::is_utility () const
 bool
 PluginInfo::is_analyzer () const
 {
-	return (category == "Analyser" || category == "Anaylsis" || category == "Analyzer");
+	return (category == "Analyser" || category == "Analysis" || category == "Analyzer");
 }

@@ -26,10 +26,12 @@
 #endif
 
 #ifdef WINDOWS_SEMAPHORE
-#include <windows.h>
+# include <windows.h>
+#elif defined USE_FUTEX_SEMAPHORE
+# include <atomic>
 #else
-#include <pthread.h>
-#include <semaphore.h>
+# include <pthread.h>
+# include <semaphore.h>
 #endif
 
 #include "pbd/libpbd_visibility.h"
@@ -44,6 +46,9 @@ class LIBPBD_API Semaphore {
 #elif __APPLE__
 	sem_t* _sem;
 	sem_t* ptr_to_sem() const { return _sem; }
+#elif defined USE_FUTEX_SEMAPHORE
+	int              _futex;
+	std::atomic<int> _value;
 #else
 	mutable sem_t _sem;
 	sem_t* ptr_to_sem() const { return &_sem; }
@@ -53,7 +58,7 @@ class LIBPBD_API Semaphore {
 	Semaphore (const char* name, int val);
 	~Semaphore ();
 
-#ifdef WINDOWS_SEMAPHORE
+#if defined WINDOWS_SEMAPHORE || defined USE_FUTEX_SEMAPHORE
 
 	int signal ();
 	int wait ();

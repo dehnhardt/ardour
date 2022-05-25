@@ -64,7 +64,7 @@ public:
 	static PBD::Signal1<void, pframes_t> CycleStart;
 
 protected:
-	XMLNode& state();
+	XMLNode& state() const;
 
 private:
 	BufferSet mixbufs;
@@ -79,7 +79,7 @@ private:
 	void send_from_going_away ();
 	void send_to_going_away ();
 	void send_to_property_changed (const PBD::PropertyChange&);
-	int  connect_when_legal ();
+	int  after_connect ();
 	void init_gain ();
 	int  use_target (boost::shared_ptr<Route>, bool update_name = true);
 	void target_io_changed ();

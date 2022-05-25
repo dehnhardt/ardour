@@ -27,15 +27,15 @@ namespace ARDOUR {
 
 class Session;
 
-class LIBARDOUR_API Readable {
+class LIBARDOUR_API AudioReadable {
 public:
-	virtual ~Readable() {}
+	virtual ~AudioReadable() {}
 
-	static std::vector<boost::shared_ptr<Readable> >
+	static std::vector<boost::shared_ptr<AudioReadable> >
 		load (Session&, std::string const&);
 
 	virtual samplecnt_t read (Sample*, samplepos_t pos, samplecnt_t cnt, int channel) const = 0;
-	virtual samplecnt_t readable_length() const = 0;
+	virtual samplecnt_t readable_length_samples() const = 0;
 	virtual uint32_t  n_channels () const = 0;
 };
 

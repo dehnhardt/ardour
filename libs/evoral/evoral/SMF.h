@@ -65,7 +65,7 @@ public:
 
 	static bool test(const std::string& path);
 	int  open(const std::string& path, int track=1);
-	// XXX 19200 = 10 * Timecode::BBT_Time::ticks_per_beat
+	// XXX 19200 = 10 * Temporal::ticks_per_beat
 	int  create(const std::string& path, int track=1, uint16_t ppqn=19200);
 	void close();
 
@@ -86,8 +86,15 @@ public:
 
 	double round_to_file_precision (double val) const;
 
-	bool is_type0 () const { return _type0; }
-	std::set<uint8_t> channels () const { return _type0channels; }
+	int smf_format () const;
+
+	int num_channels () const { return _num_channels; }
+	typedef std::bitset<16> UsedChannels;
+	UsedChannels const& used_channels () const { return _used_channels; }
+	void set_used_channels (UsedChannels used) { _used_channels  = used; }
+	uint64_t n_note_on_events () const { return _n_note_on_events; }
+	bool has_pgm_change () const { return _has_pgm_change; }
+
 	void track_names (std::vector<std::string>&) const;
 	void instrument_names (std::vector<std::string>&) const;
 
@@ -129,14 +136,19 @@ public:
 	Markers const & markers() const { return _markers; }
 	void load_markers ();
 
+  protected:
+
+	uint64_t _n_note_on_events;
+	bool     _has_pgm_change;
+
+	int _num_channels;
+	UsedChannels _used_channels;
+
   private:
 	smf_t*       _smf;
 	smf_track_t* _smf_track;
 	bool         _empty; ///< true iff file contains(non-empty) events
 	mutable Glib::Threads::Mutex _smf_lock;
-
-	bool              _type0;
-	std::set<uint8_t> _type0channels;
 
 	mutable Markers _markers;
 };

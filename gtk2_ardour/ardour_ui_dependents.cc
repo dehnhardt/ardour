@@ -42,21 +42,22 @@
 #include "actions.h"
 #include "ardour_message.h"
 #include "ardour_ui.h"
+#include "audio_clip_editor.h"
 #include "public_editor.h"
 #include "meterbridge.h"
 #include "luainstance.h"
 #include "luawindow.h"
 #include "mixer_ui.h"
 #include "recorder_ui.h"
+#include "trigger_page.h"
 #include "keyboard.h"
 #include "keyeditor.h"
-#include "splash.h"
 #include "rc_option_editor.h"
 #include "route_params_ui.h"
 #include "time_info_box.h"
+#include "trigger_ui.h"
 #include "step_entry.h"
 #include "opts.h"
-#include "utils.h"
 
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
@@ -89,6 +90,8 @@ ARDOUR_UI::we_have_dependents ()
 	 */
 	ProcessorBox::register_actions ();
 	StepEntry::setup_actions_and_bindings ();
+	TriggerUI::setup_actions_and_bindings ();
+	ClipEditorBox::init ();
 
 	/* Global, editor, mixer, processor box actions are defined now. Link
 	   them with any bindings, so that GTK does not get a chance to define
@@ -109,7 +112,6 @@ ARDOUR_UI::we_have_dependents ()
 
 	Gtkmm2ext::Bindings::associate_all ();
 
-	editor->setup_tooltips ();
 	editor->UpdateAllTransportClocks.connect (sigc::mem_fun (*this, &ARDOUR_UI::update_transport_clocks));
 
 	/* all actions are defined */
@@ -133,8 +135,8 @@ ARDOUR_UI::connect_dependents_to_session (ARDOUR::Session *s)
 	BootMessage (_("Setup Mixer"));
 	mixer->set_session (s);
 	recorder->set_session (s);
+	trigger_page->set_session (s);
 	meterbridge->set_session (s);
-	luawindow->set_session (s);
 
 	/* its safe to do this now */
 
@@ -178,6 +180,8 @@ ARDOUR_UI::tab_window_root_drop (GtkNotebook* src,
 		tabbable = rc_option_editor;
 	} else if (w == GTK_WIDGET(recorder->contents().gobj())) {
 		tabbable = recorder;
+	} else if (w == GTK_WIDGET(trigger_page->contents().gobj())) {
+		tabbable = trigger_page;
 	} else {
 		return 0;
 	}
@@ -198,7 +202,9 @@ ARDOUR_UI::tab_window_root_drop (GtkNotebook* src,
 bool
 ARDOUR_UI::idle_ask_about_quit ()
 {
-	if (_session && _session->dirty()) {
+	const auto ask_before_closing = UIConfiguration::instance ().get_ask_before_closing_last_window ();
+
+	if ((_session && _session->dirty ()) || !ask_before_closing) {
 		finish ();
 	} else {
 		/* no session or session not dirty, but still ask anyway */
@@ -210,7 +216,7 @@ ARDOUR_UI::idle_ask_about_quit ()
 		                         true); /* modal */
 		msg.set_default_response (Gtk::RESPONSE_YES);
 
-		if (msg.run() == Gtk::RESPONSE_YES) {
+		if (msg.run () == Gtk::RESPONSE_YES) {
 			finish ();
 		}
 	}
@@ -269,13 +275,14 @@ ARDOUR_UI::setup_windows ()
 		return -1;
 	}
 
-	if (create_meterbridge ()) {
-		error << _("UI: cannot setup meterbridge") << endmsg;
+	if (create_trigger_page ()) {
+		error << _("UI: cannot setup recorder") << endmsg;
 		return -1;
 	}
 
-	if (create_luawindow ()) {
-		error << _("UI: cannot setup luawindow") << endmsg;
+
+	if (create_meterbridge ()) {
+		error << _("UI: cannot setup meterbridge") << endmsg;
 		return -1;
 	}
 
@@ -290,6 +297,7 @@ ARDOUR_UI::setup_windows ()
 	mixer->add_to_notebook (_tabs);
 	editor->add_to_notebook (_tabs);
 	recorder->add_to_notebook (_tabs);
+	trigger_page->add_to_notebook (_tabs);
 
 	top_packer.pack_start (menu_bar_base, false, false);
 
@@ -386,6 +394,8 @@ ARDOUR_UI::setup_windows ()
 			_tabs.set_current_page (_tabs.page_num (rc_option_editor->contents()));
 		} else if (recorder && current_tab == "recorder") {
 			_tabs.set_current_page (_tabs.page_num (recorder->contents()));
+		} else if (recorder && current_tab == "trigger") {
+			_tabs.set_current_page (_tabs.page_num (trigger_page->contents()));
 		} else if (editor) {
 			_tabs.set_current_page (_tabs.page_num (editor->contents()));
 		}

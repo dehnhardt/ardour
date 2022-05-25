@@ -43,7 +43,7 @@ using namespace PBD;
 #define GAIN_COEFF_DELTA (1e-5)
 
 Amp::Amp (Session& s, const std::string& name, boost::shared_ptr<GainControl> gc, bool control_midi_also)
-	: Processor(s, "Amp")
+	: Processor(s, "Amp", Temporal::AudioTime)
 	, _apply_gain_automation(false)
 	, _current_gain(GAIN_COEFF_ZERO)
 	, _current_automation_sample (INT64_MAX)
@@ -72,17 +72,10 @@ Amp::configure_io (ChanCount in, ChanCount out)
 	return Processor::configure_io (in, out);
 }
 
-static void
-scale_midi_velocity(Evoral::Event<MidiBuffer::TimeType>& ev, float factor)
-{
-	factor = std::max(factor, 0.0f);
-	ev.set_velocity(std::min(127L, lrintf(ev.velocity() * factor)));
-}
-
 void
 Amp::run (BufferSet& bufs, samplepos_t /*start_sample*/, samplepos_t /*end_sample*/, double /*speed*/, pframes_t nframes, bool)
 {
-	if (!_active && !_pending_active) {
+	if (!check_active()) {
 		/* disregard potentially prepared gain-automation. */
 		_apply_gain_automation = false;
 		return;
@@ -103,7 +96,7 @@ Amp::run (BufferSet& bufs, samplepos_t /*start_sample*/, samplepos_t /*end_sampl
 					Evoral::Event<MidiBuffer::TimeType> ev = *m;
 					if (ev.is_note_on()) {
 						assert(ev.time() >= 0 && ev.time() < nframes);
-						scale_midi_velocity (ev, fabsf (gab[ev.time()]));
+						ev.scale_velocity (fabsf (gab[ev.time()]));
 					}
 				}
 			}
@@ -155,8 +148,6 @@ Amp::run (BufferSet& bufs, samplepos_t /*start_sample*/, samplepos_t /*end_sampl
 			_current_gain = target_gain;
 		}
 	}
-
-	_active = _pending_active;
 }
 
 gain_t
@@ -224,7 +215,7 @@ Amp::apply_gain (BufferSet& bufs, samplecnt_t sample_rate, samplecnt_t nframes, 
 						m = mb.erase (m);
 						continue;
 					} else if (ev.is_note_on()) {
-						scale_midi_velocity (ev, scale);
+						ev.scale_velocity (scale);
 					}
 				}
 				++m;
@@ -308,7 +299,7 @@ Amp::apply_simple_gain (BufferSet& bufs, samplecnt_t nframes, gain_t target, boo
 				for (MidiBuffer::iterator m = mb.begin(); m != mb.end(); ++m) {
 					Evoral::Event<MidiBuffer::TimeType> ev = *m;
 					if (ev.is_note_on()) {
-						scale_midi_velocity(ev, fabsf (target));
+						ev.scale_velocity (fabsf (target));
 					}
 				}
 			}
@@ -331,7 +322,7 @@ Amp::apply_simple_gain (AudioBuffer& buf, samplecnt_t nframes, gain_t target, sa
 }
 
 XMLNode&
-Amp::state ()
+Amp::state () const
 {
 	XMLNode& node (Processor::state ());
 	switch (_gain_control->parameter().type()) {

@@ -81,6 +81,7 @@ using namespace ArdourWidgets;
 using Gtkmm2ext::Keyboard;
 
 #define TOP_LEVEL_WIDGET controls_ebox
+#define PX_SCALE(px) std::max((float)px, rintf((float)px * UIConfiguration::instance().get_ui_scale()))
 
 const double trim_handle_size = 6.0; /* pixels */
 uint32_t TimeAxisView::button_height = 0;
@@ -207,7 +208,7 @@ TimeAxisView::TimeAxisView (ARDOUR::Session* sess, PublicEditor& ed, TimeAxisVie
 				  Gdk::ENTER_NOTIFY_MASK|
 				  Gdk::LEAVE_NOTIFY_MASK|
 				  Gdk::SCROLL_MASK);
-	controls_ebox.set_flags (CAN_FOCUS);
+	controls_ebox.set_can_focus ();
 
 	/* note that this handler connects *before* the default handler */
 	controls_ebox.signal_scroll_event().connect (sigc::mem_fun (*this, &TimeAxisView::controls_ebox_scroll), true);
@@ -445,9 +446,8 @@ TimeAxisView::controls_ebox_button_press (GdkEventButton* event)
 void
 TimeAxisView::idle_resize (int32_t h)
 {
-	set_height (std::max(0, h));
+	set_height (std::max(0, h), OnlySelf, true);
 }
-
 
 bool
 TimeAxisView::controls_ebox_motion (GdkEventMotion* ev)
@@ -599,7 +599,7 @@ TimeAxisView::set_height_enum (Height h, bool apply_to_selection)
 }
 
 void
-TimeAxisView::set_height (uint32_t h, TrackHeightMode m)
+TimeAxisView::set_height (uint32_t h, TrackHeightMode m, bool from_idle)
 {
 	uint32_t lanes = 0;
 	if (m == TotalHeight) {
@@ -636,6 +636,10 @@ TimeAxisView::set_height (uint32_t h, TrackHeightMode m)
 	}
 
 	_editor.override_visible_track_count ();
+
+	if (!from_idle) {
+		_editor.queue_redisplay_track_views ();
+	}
 }
 
 void
@@ -828,7 +832,7 @@ TimeAxisView::set_samples_per_pixel (double fpp)
 }
 
 void
-TimeAxisView::show_timestretch (samplepos_t start, samplepos_t end, int layers, int layer)
+TimeAxisView::show_timestretch (timepos_t const & start, timepos_t const & end, int layers, int layer)
 {
 	for (Children::iterator i = children.begin(); i != children.end(); ++i) {
 		(*i)->show_timestretch (start, end, layers, layer);
@@ -880,18 +884,18 @@ TimeAxisView::show_selection (TimeSelection& ts)
 		gap = ceil (gap * ui_scale);
 	}
 
-	for (list<AudioRange>::iterator i = ts.begin(); i != ts.end(); ++i) {
-		samplepos_t start, end;
-		samplecnt_t cnt;
+	for (list<TimelineRange>::iterator i = ts.begin(); i != ts.end(); ++i) {
+		timepos_t start, end;
+		timecnt_t cnt;
 
-		start = (*i).start;
-		end = (*i).end;
-		cnt = end - start + 1;
+		start = (*i).start();
+		end = (*i).end();
+		cnt = start.distance (end); /* XXX NUTEMPO used to add 1 here */
 
 		rect = get_selection_rect ((*i).id);
 
-		x1 = _editor.sample_to_pixel (start);
-		x2 = _editor.sample_to_pixel (start + cnt - 1);
+		x1 = _editor.time_to_pixel (start);
+		x2 = _editor.time_to_pixel (end.decrement());
 		y2 = current_height() - 1;
 
 		if (dynamic_cast<AudioTimeAxisView*>(this)) {
@@ -977,7 +981,7 @@ TimeAxisView::order_selection_trims (ArdourCanvas::Item *item, bool put_start_on
 	}
 }
 
-// retuned rect is pushed back into the used_selection_rects list
+// returned rect is pushed back into the used_selection_rects list
 // in TimeAxisView::show_selection() which is the only caller.
 SelectionRect *
 TimeAxisView::get_selection_rect (uint32_t id)
@@ -1072,7 +1076,7 @@ TimeAxisView::remove_child (boost::shared_ptr<TimeAxisView> child)
  *  @param result Filled in with selectable things.
  */
 void
-TimeAxisView::get_selectables (samplepos_t start, samplepos_t end, double top, double bot, list<Selectable*>& results, bool within)
+TimeAxisView::get_selectables (timepos_t const & start, timepos_t const & end, double top, double bot, list<Selectable*>& results, bool within)
 {
 	for (Children::iterator i = children.begin(); i != children.end(); ++i) {
 		if (!(*i)->hidden()) {
@@ -1336,11 +1340,11 @@ TimeAxisView::preset_height (Height h)
 {
 	switch (h) {
 	case HeightLargest:
-		return (button_height * 2) + extra_height + 260;
+		return (button_height * 2) + extra_height + PX_SCALE (260);
 	case HeightLarger:
-		return (button_height * 2) + extra_height + 160;
+		return (button_height * 2) + extra_height + PX_SCALE (160);
 	case HeightLarge:
-		return (button_height * 2) + extra_height + 60;
+		return (button_height * 2) + extra_height + PX_SCALE (60);
 	case HeightNormal:
 		return (button_height * 2) + extra_height + 10;
 	case HeightSmall:

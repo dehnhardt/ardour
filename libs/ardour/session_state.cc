@@ -104,6 +104,7 @@
 #include "ardour/disk_reader.h"
 #include "ardour/filename_extensions.h"
 #include "ardour/graph.h"
+#include "ardour/io_plug.h"
 #include "ardour/location.h"
 #include "ardour/lv2_plugin.h"
 #include "ardour/midi_model.h"
@@ -111,6 +112,7 @@
 #include "ardour/midi_scene_changer.h"
 #include "ardour/midi_source.h"
 #include "ardour/midi_track.h"
+#include "ardour/mixer_scene.h"
 #include "ardour/playlist_factory.h"
 #include "ardour/playlist_source.h"
 #include "ardour/port.h"
@@ -153,6 +155,7 @@
 using namespace std;
 using namespace ARDOUR;
 using namespace PBD;
+using namespace Temporal;
 
 #define DEBUG_UNDO_HISTORY(msg) DEBUG_TRACE (PBD::DEBUG::UndoHistory, string_compose ("%1: %2\n", __LINE__, msg));
 
@@ -213,7 +216,6 @@ Session::pre_engine_init (string fullpath)
 	/* stop IO objects from doing stuff until we're ready for them */
 
 	Delivery::disable_panners ();
-	IO::disable_connecting ();
 }
 
 int
@@ -259,20 +261,6 @@ Session::post_engine_init ()
 	_engine.Halted.connect_same_thread (*this, boost::bind (&Session::engine_halted, this));
 	_engine.Xrun.connect_same_thread (*this, boost::bind (&Session::xrun_recovery, this));
 
-	try {
-		/* tempo map requires sample rate knowledge */
-
-		delete _tempo_map;
-		_tempo_map = new TempoMap (_current_sample_rate);
-		_tempo_map->PropertyChanged.connect_same_thread (*this, boost::bind (&Session::tempo_map_changed, this, _1));
-		_tempo_map->MetricPositionChanged.connect_same_thread (*this, boost::bind (&Session::tempo_map_changed, this, _1));
-	} catch (std::exception const & e) {
-		error << _("Unexpected exception during session setup: ") << e.what() << endmsg;
-		return -2;
-	} catch (...) {
-		error << _("Unknown exception during session setup") << endmsg;
-		return -3;
-	}
 
 	try {
 		/* MidiClock requires a tempo map */
@@ -1071,7 +1059,7 @@ Session::save_default_options ()
 }
 
 XMLNode&
-Session::get_state ()
+Session::get_state () const
 {
 	/* this is not directly called, but required by PBD::Stateful */
 	assert (0);
@@ -1183,7 +1171,7 @@ struct route_id_compare {
 } // anon namespace
 
 XMLNode&
-Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_assets)
+Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_assets) const
 {
 	LocaleGuard lg;
 	XMLNode* node = new XMLNode("Session");
@@ -1224,8 +1212,8 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_ass
 
 			string p;
 
-			vector<space_and_path>::iterator i = session_dirs.begin();
-			vector<space_and_path>::iterator next;
+			vector<space_and_path>::const_iterator i = session_dirs.begin();
+			vector<space_and_path>::const_iterator next;
 
 			++i; /* skip the first one */
 			next = i;
@@ -1300,7 +1288,7 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_ass
 			_playlists->foreach (boost::bind (merge_all_sources, _1, &sources_used_by_this_snapshot), false);
 		}
 
-		for (SourceMap::iterator siter = sources.begin(); siter != sources.end(); ++siter) {
+		for (SourceMap::const_iterator siter = sources.begin(); siter != sources.end(); ++siter) {
 
 			/* Don't save information about non-file Sources, or
 			 * about file sources that are empty
@@ -1328,70 +1316,20 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_ass
 			}
 
 			if (snapshot_type != NormalSave && fs->within_session ()) {
-				/* copy MIDI sources to new file
-				 *
-				 * We cannot replace the midi-source and MidiRegion::clobber_sources,
-				 * because the GUI (midi_region) has a direct pointer to the midi-model
-				 * of the source, as does UndoTransaction.
-				 *
-				 * On the upside, .mid files are not kept open. The file is only open
-				 * when reading the model initially and when flushing the model to disk:
-				 * source->session_saved () or export.
-				 *
-				 * We can change the _path of the existing source under the hood, keeping
-				 * all IDs, references and pointers intact.
-				 * */
-				boost::shared_ptr<SMFSource> ms;
-				if ((ms = boost::dynamic_pointer_cast<SMFSource> (siter->second)) != 0) {
-					const std::string ancestor_name = ms->ancestor_name();
-					const std::string base          = PBD::basename_nosuffix(ancestor_name);
-					const string path               = new_midi_source_path (base, false);
+				/* this copying of MIDI files should not really be occuring within a const scope like
+				   ::state(). However the copying is too intertwined with getting the current state of
+				   the Source, and so we can't move it to before ::state() is called. If we are not
+				   switching to a new snapshot (but are making a snapshot), we want the state from
+				   before the copy. If we are switching to a new snapshot, we want the state from after
+				   the copy. This makes it almost impossible to tease this apart. So for now (April
+				   2022) we use const_cast.
+				*/
 
-					/* Session::save_state() will already have called
-					 * ms->session_saved ();
-					 */
-
-					/* use SMF-API to clone data (use the midi_model, not data on disk) */
-					boost::shared_ptr<SMFSource> newsrc (new SMFSource (*this, path, ms->flags()));
-					Source::Lock lm (ms->mutex());
-
-					if (!ms->model()) {
-						ms->load_model (lm);
-					}
-					/* write_to() calls newsrc->flush_midi () to write the file to disk */
-					if (ms->write_to (lm, newsrc, Temporal::Beats(), std::numeric_limits<Temporal::Beats>::max())) {
-						error << string_compose (_("Session-Save: Failed to copy MIDI Source '%1' for snapshot"), ancestor_name) << endmsg;
-					} else {
-						newsrc->session_saved (); /*< this sohuld be a no-op */
-
-						if (snapshot_type == SnapshotKeep) {
-							/* keep working on current session.
-							 *
-							 * Save snapshot-state with the original filename.
-							 * Switch to use new path for future saves of the main session.
-							 */
-							child->add_child_nocopy (ms->get_state());
-						}
-
-						/* swap file-paths.
-						 * ~SMFSource unlinks removable() files.
-						 */
-						std::string npath (ms->path ());
-						ms->replace_file (newsrc->path ());
-						newsrc->replace_file (npath);
-
-						if (snapshot_type == SwitchToSnapshot) {
-							/* save and switch to snapshot.
-							 *
-							 * Leave the old file in place (as is).
-							 * Snapshot uses new source directly
-							 */
-							child->add_child_nocopy (ms->get_state());
-						}
-					}
-					continue;
+				if (const_cast<Session*>(this)->maybe_copy_midifile (snapshot_type, siter->second, child)) {
+					continue; /* state already added to child */
 				}
 			}
+
 			child->add_child_nocopy (siter->second->get_state());
 		}
 	}
@@ -1433,10 +1371,10 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_ass
 				ca->add_child_nocopy (*can);
 				/* see above, child is still "Regions" here  */
 				if (i->second->playlist() == 0 && only_used_assets) {
-					if (boost::shared_ptr<AudioRegion> ar = boost::dynamic_pointer_cast<AudioRegion>( i->second)) {
+					if (boost::shared_ptr<AudioRegion> ar = boost::dynamic_pointer_cast<AudioRegion> (i->second)) {
 						child->add_child_nocopy (ar->get_basic_state ());
 					} else {
-						child->add_child_nocopy (ar->get_state ());
+						child->add_child_nocopy (i->second->get_state ());
 					}
 				}
 			}
@@ -1451,12 +1389,13 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_ass
 			node->add_child_nocopy (_locations->get_state());
 		}
 	} else {
-		Locations loc (*this);
+		Session* ncthis = const_cast<Session*> (this);
+		Locations loc (*ncthis);
 		const bool was_dirty = dirty();
 		// for a template, just create a new Locations, populate it
 		// with the default start and end, and get the state for that.
-		Location* range = new Location (*this, 0, 0, _("session"), Location::IsSessionRange, 0);
-		range->set (max_samplepos, 0);
+		Location* range = new Location (*ncthis, timepos_t (Temporal::AudioTime), timepos_t (Temporal::AudioTime), _("session"), Location::IsSessionRange);
+		range->set (timepos_t::max (Temporal::AudioTime), timepos_t (Temporal::AudioTime));
 		loc.add (range);
 		XMLNode& locations_state = loc.get_state();
 
@@ -1468,7 +1407,7 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_ass
 		 */
 
 		if (!was_dirty) {
-			unset_dirty ();
+			ncthis->unset_dirty ();
 		}
 	}
 
@@ -1507,7 +1446,7 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_ass
 	_playlists->add_state (node, save_template, !only_used_assets);
 
 	child = node->add_child ("RouteGroups");
-	for (list<RouteGroup *>::iterator i = _route_groups.begin(); i != _route_groups.end(); ++i) {
+	for (list<RouteGroup *>::const_iterator i = _route_groups.begin(); i != _route_groups.end(); ++i) {
 		child->add_child_nocopy ((*i)->get_state());
 	}
 
@@ -1518,7 +1457,7 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_ass
 	}
 
 	node->add_child_nocopy (_speakers->get_state());
-	node->add_child_nocopy (_tempo_map->get_state());
+	node->add_child_nocopy (TempoMap::fetch()->get_state());
 	node->add_child_nocopy (get_control_protocol_state());
 
 	if (_extra_xml) {
@@ -1545,11 +1484,124 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool only_used_ass
 		node->add_child_nocopy (*script_node);
 	}
 
+	{
+		Glib::Threads::RWLock::ReaderLock lm (_mixer_scenes_lock);
+		uint64_t idx = 0;
+		uint64_t last = 0;
+		for (auto const& i : _mixer_scenes) {
+			++idx;
+			if (i && !i->empty ()) {
+				last = idx;
+			}
+		}
+		if (last > 0) {
+			idx = 0;
+			XMLNode* ms_node = new XMLNode (X_("MixerScenes"));
+			ms_node->set_property ("n_scenes", (uint64_t) _mixer_scenes.size ());
+			for (auto const& i : _mixer_scenes) {
+				if (i && !i->empty ()) {
+					XMLNode& ms_state (i->get_state ());
+					ms_state.set_property ("index", idx);
+					ms_node->add_child_nocopy (ms_state);
+				}
+				if (++idx >= last) {
+					break;
+				}
+			}
+			node->add_child_nocopy (*ms_node);
+		}
+	}
+
+	{
+		boost::shared_ptr<IOPlugList> iop (_io_plugins.reader ());
+		XMLNode* iop_node = new XMLNode (X_("IOPlugins"));
+		for (auto const& i : *iop) {
+			iop_node->add_child_nocopy (i->get_state());
+		}
+		node->add_child_nocopy (*iop_node);
+	}
+
 	return *node;
 }
 
+bool
+Session::maybe_copy_midifile (snapshot_t snapshot_type, boost::shared_ptr<Source> src, XMLNode* child)
+{
+	/* copy MIDI sources to new file
+	 *
+	 * We cannot replace the midi-source and MidiRegion::clobber_sources,
+	 * because the GUI (midi_region) has a direct pointer to the midi-model
+	 * of the source, as does UndoTransaction.
+	 *
+	 * On the upside, .mid files are not kept open. The file is only open
+	 * when reading the model initially and when flushing the model to disk:
+	 * source->session_saved () or export.
+	 *
+	 * We can change the _path of the existing source under the hood, keeping
+	 * all IDs, references and pointers intact.
+	 * */
+
+	boost::shared_ptr<SMFSource> ms;
+
+	if ((ms = boost::dynamic_pointer_cast<SMFSource> (src)) == 0) {
+		return false; /* No, it was not a MIDI source */
+	}
+
+	const std::string ancestor_name = ms->ancestor_name();
+	const std::string base          = PBD::basename_nosuffix(ancestor_name);
+	const string path               = new_midi_source_path (base, false);
+
+	/* Session::save_state() will already have called
+	 * ms->session_saved ();
+	 */
+
+	/* use SMF-API to clone data (use the midi_model, not data on disk) */
+	boost::shared_ptr<SMFSource> newsrc (new SMFSource (*this, path, ms->flags()));
+	{
+		Source::WriterLock lm (ms->mutex());
+
+		if (!ms->model()) {
+			ms->load_model (lm);
+		}
+	}
+	Source::ReaderLock lm (ms->mutex());
+	/* write_to() calls newsrc->flush_midi () to write the file to disk */
+	if (ms->write_to (lm, newsrc, Temporal::Beats(), std::numeric_limits<Temporal::Beats>::max())) {
+		error << string_compose (_("Session-Save: Failed to copy MIDI Source '%1' for snapshot"), ancestor_name) << endmsg;
+	} else {
+		newsrc->session_saved (); /*< this sohuld be a no-op */
+
+		if (snapshot_type == SnapshotKeep) {
+			/* keep working on current session.
+			 *
+			 * Save snapshot-state with the original filename.
+			 * Switch to use new path for future saves of the main session.
+			 */
+			child->add_child_nocopy (ms->get_state());
+		}
+
+		/* swap file-paths.
+		 * ~SMFSource unlinks removable() files.
+		 */
+		std::string npath (ms->path ());
+		ms->replace_file (newsrc->path ());
+		newsrc->replace_file (npath);
+
+		if (snapshot_type == SwitchToSnapshot) {
+			/* save and switch to snapshot.
+			 *
+			 * Leave the old file in place (as is).
+			 * Snapshot uses new source directly
+			 */
+			child->add_child_nocopy (ms->get_state());
+		}
+	}
+
+	return true; /* Yes, it was a MIDI file */
+}
+
 XMLNode&
-Session::get_control_protocol_state ()
+Session::get_control_protocol_state () const
 {
 	return ControlProtocolManager::instance().get_state ();
 }
@@ -1567,6 +1619,21 @@ Session::set_state (const XMLNode& node, int version)
 	if (node.name() != X_("Session")) {
 		fatal << _("programming error: Session: incorrect XML node sent to set_state()") << endmsg;
 		goto out;
+	}
+
+	/* need the tempo map setup ASAP */
+
+	if ((child = find_named_node (node, "TempoMap")) == 0) {
+		error << _("Session: XML state has no Tempo Map section") << endmsg;
+		goto out;
+	} else {
+		try {
+			TempoMap::WritableSharedPtr tmap = TempoMap::write_copy (); /* get writable copy of current tempo map */
+			tmap->set_state (*child, version); /* reset its state */
+			TempoMap::update (tmap); /* update the global tempo map manager */
+		} catch (...) {
+			goto out;
+		}
 	}
 
 	node.get_property ("name", _name);
@@ -1591,7 +1658,7 @@ Session::set_state (const XMLNode& node, int version)
 
 	setup_raid_path(_session_dir->root_path());
 
-	node.get_property (X_("end-is-free"), _session_range_is_free);  //deprectated, but use old values if they are in the config
+	node.get_property (X_("end-is-free"), _session_range_is_free);  //deprecated, but use old values if they are in the config
 
 	node.get_property (X_("session-range-is-free"), _session_range_is_free);
 
@@ -1626,8 +1693,6 @@ Session::set_state (const XMLNode& node, int version)
 		_midi_ports->set_midi_port_states (child->children());
 	}
 
-	IO::disable_connecting ();
-
 	Stateful::save_extra_xml (node);
 
 	if (((child = find_named_node (node, "Options")) != 0)) { /* old style */
@@ -1657,13 +1722,6 @@ Session::set_state (const XMLNode& node, int version)
 		goto out;
 	}
 
-	if ((child = find_named_node (node, "TempoMap")) == 0) {
-		error << _("Session: XML state has no Tempo Map section") << endmsg;
-		goto out;
-	} else if (_tempo_map->set_state (*child, version)) {
-		goto out;
-	}
-
 	if ((child = find_named_node (node, "Locations")) == 0) {
 		error << _("Session: XML state has no locations section") << endmsg;
 		goto out;
@@ -1674,7 +1732,7 @@ Session::set_state (const XMLNode& node, int version)
 	locations_changed ();
 
 	if (_session_range_location) {
-		AudioFileSource::set_header_position_offset (_session_range_location->start());
+		AudioFileSource::set_header_position_offset (_session_range_location->start().samples());
 	}
 
 	if ((child = find_named_node (node, "Regions")) == 0) {
@@ -1742,7 +1800,8 @@ Session::set_state (const XMLNode& node, int version)
 			if (!r->whole_file ()) {
 				continue;
 			}
-			for (uint32_t n = 0; n < r->n_channels (); ++n) {
+			SourceList::size_type sz = r->sources().size();
+			for (uint32_t n = 0; n < sz; ++n) {
 				SourceMap::iterator j = src_map.find (r->source(n)->id());
 				if (j != src_map.end ()) {
 					/* found whole-file region for given source */
@@ -1767,7 +1826,7 @@ Session::set_state (const XMLNode& node, int version)
 			plist.add (Properties::whole_file, true);
 			plist.add (Properties::automatic, true);
 			plist.add (Properties::start, 0);
-			plist.add (Properties::length, afs->length (0));
+			plist.add (Properties::length, afs->length ());
 			plist.add (Properties::layer, 0);
 
 			SourceList srcs;
@@ -1851,11 +1910,44 @@ Session::set_state (const XMLNode& node, int version)
 		}
 	}
 
+	if ((child = find_named_node (node, "MixerScenes"))) {
+		Glib::Threads::RWLock::WriterLock lm (_mixer_scenes_lock);
+		uint64_t n_scenes = 0;
+		child->get_property("n_scenes", n_scenes);
+		_mixer_scenes.resize (n_scenes);
+		for (auto const n : child->children () ) {
+			uint64_t index = 0;
+			if (n->get_property("index", index)) {
+				_mixer_scenes[index] = boost::shared_ptr<MixerScene> (new MixerScene (*this));
+				_mixer_scenes[index]->set_state (*n, version);
+			}
+		}
+	}
+
+	if ((child = find_named_node (node, "IOPlugins"))) {
+		RCUWriter<IOPlugList> writer (_io_plugins);
+		boost::shared_ptr<IOPlugList> iopl = writer.get_copy ();
+		for (XMLNodeList::const_iterator n = child->children ().begin (); n != child->children ().end (); ++n) {
+			boost::shared_ptr<IOPlug> iop = boost::make_shared<IOPlug>(*this);
+			if (0 == iop->set_state (**n, version)) {
+				iopl->push_back (iop);
+				iop->LatencyChanged.connect_same_thread (*this, boost::bind (&Session::update_latency_compensation, this, true, false));
+			} else {
+				/* TODO Unknown I/O Plugin, retain state */
+			}
+		}
+		Glib::Threads::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
+		for (auto const& i : *iopl) {
+			i->ensure_io ();
+		}
+	}
+
 	if ((child = find_named_node (node, X_("Selection")))) {
 		_selection->set_state (*child, version);
 	}
 
 	update_route_record_state ();
+	sync_cues ();
 
 	/* here beginneth the second phase ... */
 	set_snapshot_name (_current_snapshot_name);
@@ -2327,7 +2419,7 @@ Session::XMLAudioRegionFactory (const XMLNode& node, bool /*full*/)
 			for (SourceList::iterator sx = sources.begin(); sx != sources.end(); ++sx) {
 				boost::shared_ptr<SilentFileSource> sfp = boost::dynamic_pointer_cast<SilentFileSource> (*sx);
 				if (sfp) {
-					sfp->set_length (region->length());
+					sfp->set_length (region->length().samples());
 				}
 			}
 		}
@@ -2396,7 +2488,7 @@ Session::XMLMidiRegionFactory (const XMLNode& node, bool /*full*/)
 			for (SourceList::iterator sx = sources.begin(); sx != sources.end(); ++sx) {
 				boost::shared_ptr<SilentFileSource> sfp = boost::dynamic_pointer_cast<SilentFileSource> (*sx);
 				if (sfp) {
-					sfp->set_length (region->length());
+					sfp->set_length (region->length().samples());
 				}
 			}
 		}
@@ -2591,6 +2683,7 @@ Session::XMLSourceFactory (const XMLNode& node)
 
 	catch (failed_constructor& err) {
 		error << string_compose (_("Found a sound file that cannot be used by %1. Talk to the programmers."), PROGRAM_NAME) << endmsg;
+		node.dump (std::cout, " Invalid Source: ");
 		return boost::shared_ptr<Source>();
 	}
 }
@@ -3111,6 +3204,14 @@ Session::begin_reversible_command (const string& name)
 void
 Session::begin_reversible_command (GQuark q)
 {
+	if (_current_trans) {
+		cerr << "An UNDO transaction was started while a prior command was underway. Aborting command (" << g_quark_to_string (q) << ") and prior (" << _current_trans->name() << ")" << endl;
+		PBD::warning << "An UNDO transaction was started while a prior command was underway. Aborting command (" << g_quark_to_string (q) << ") and prior (" << _current_trans->name() << ")" << endmsg;
+		abort_reversible_command();
+		assert (false);
+		return;
+	}
+
 	/* If nested begin/commit pairs are used, we create just one UndoTransaction
 	   to hold all the commands that are committed.  This keeps the order of
 	   commands correct in the history.
@@ -3518,7 +3619,7 @@ Session::cleanup_sources (CleanupReport& rep)
 		 * capture files.
 		 */
 
-		if (!i->second->used() && (i->second->length(i->second->natural_position()) > 0)) {
+		if (!i->second->used() && (i->second->empty())) {
 			dead_sources.push_back (i->second);
 		}
 
@@ -3987,83 +4088,92 @@ Session::restore_history (string snapshot_name)
 	// replace history
 	_history.clear();
 
-	for (XMLNodeConstIterator it  = tree.root()->children().begin(); it != tree.root()->children().end(); ++it) {
+	try {
+		for (XMLNodeConstIterator it  = tree.root()->children().begin(); it != tree.root()->children().end(); ++it) {
 
-		XMLNode *t = *it;
+			XMLNode *t = *it;
 
-		std::string name;
-		int64_t tv_sec;
-		int64_t tv_usec;
+			std::string name;
+			int64_t tv_sec;
+			int64_t tv_usec;
 
-		if (!t->get_property ("name", name) || !t->get_property ("tv-sec", tv_sec) ||
-		    !t->get_property ("tv-usec", tv_usec)) {
-			continue;
-		}
-
-		UndoTransaction* ut = new UndoTransaction ();
-		ut->set_name (name);
-
-		struct timeval tv;
-		tv.tv_sec = tv_sec;
-		tv.tv_usec = tv_usec;
-		ut->set_timestamp(tv);
-
-		for (XMLNodeConstIterator child_it  = t->children().begin();
-				child_it != t->children().end(); child_it++)
-		{
-			XMLNode *n = *child_it;
-			Command *c;
-
-			if (n->name() == "MementoCommand" ||
-					n->name() == "MementoUndoCommand" ||
-					n->name() == "MementoRedoCommand") {
-
-				if ((c = memento_command_factory(n))) {
-					ut->add_command(c);
-				}
-
-			} else if (n->name() == "NoteDiffCommand") {
-				PBD::ID id (n->property("midi-source")->value());
-				boost::shared_ptr<MidiSource> midi_source =
-					boost::dynamic_pointer_cast<MidiSource, Source>(source_by_id(id));
-				if (midi_source) {
-					ut->add_command (new MidiModel::NoteDiffCommand(midi_source->model(), *n));
-				} else {
-					error << _("Failed to downcast MidiSource for NoteDiffCommand") << endmsg;
-				}
-
-			} else if (n->name() == "SysExDiffCommand") {
-
-				PBD::ID id (n->property("midi-source")->value());
-				boost::shared_ptr<MidiSource> midi_source =
-					boost::dynamic_pointer_cast<MidiSource, Source>(source_by_id(id));
-				if (midi_source) {
-					ut->add_command (new MidiModel::SysExDiffCommand (midi_source->model(), *n));
-				} else {
-					error << _("Failed to downcast MidiSource for SysExDiffCommand") << endmsg;
-				}
-
-			} else if (n->name() == "PatchChangeDiffCommand") {
-
-				PBD::ID id (n->property("midi-source")->value());
-				boost::shared_ptr<MidiSource> midi_source =
-					boost::dynamic_pointer_cast<MidiSource, Source>(source_by_id(id));
-				if (midi_source) {
-					ut->add_command (new MidiModel::PatchChangeDiffCommand (midi_source->model(), *n));
-				} else {
-					error << _("Failed to downcast MidiSource for PatchChangeDiffCommand") << endmsg;
-				}
-
-			} else if (n->name() == "StatefulDiffCommand") {
-				if ((c = stateful_diff_command_factory (n))) {
-					ut->add_command (c);
-				}
-			} else {
-				error << string_compose(_("Couldn't figure out how to make a Command out of a %1 XMLNode."), n->name()) << endmsg;
+			if (!t->get_property ("name", name) || !t->get_property ("tv-sec", tv_sec) ||
+			    !t->get_property ("tv-usec", tv_usec)) {
+				continue;
 			}
+
+			UndoTransaction* ut = new UndoTransaction ();
+			ut->set_name (name);
+
+			struct timeval tv;
+			tv.tv_sec = tv_sec;
+			tv.tv_usec = tv_usec;
+			ut->set_timestamp(tv);
+
+			for (XMLNodeConstIterator child_it  = t->children().begin();
+			     child_it != t->children().end(); child_it++)
+			{
+				XMLNode *n = *child_it;
+				Command *c;
+
+				if (n->name() == "MementoCommand" ||
+				    n->name() == "MementoUndoCommand" ||
+				    n->name() == "MementoRedoCommand") {
+
+					if ((c = memento_command_factory(n))) {
+						ut->add_command(c);
+					}
+
+				} else if (n->name() == "TempoCommand") {
+
+					ut->add_command (new TempoCommand (*n));
+
+				} else if (n->name() == "NoteDiffCommand") {
+					PBD::ID id (n->property("midi-source")->value());
+					boost::shared_ptr<MidiSource> midi_source =
+						boost::dynamic_pointer_cast<MidiSource, Source>(source_by_id(id));
+					if (midi_source) {
+						ut->add_command (new MidiModel::NoteDiffCommand(midi_source->model(), *n));
+					} else {
+						error << _("Failed to downcast MidiSource for NoteDiffCommand") << endmsg;
+					}
+
+				} else if (n->name() == "SysExDiffCommand") {
+
+					PBD::ID id (n->property("midi-source")->value());
+					boost::shared_ptr<MidiSource> midi_source =
+						boost::dynamic_pointer_cast<MidiSource, Source>(source_by_id(id));
+					if (midi_source) {
+						ut->add_command (new MidiModel::SysExDiffCommand (midi_source->model(), *n));
+					} else {
+						error << _("Failed to downcast MidiSource for SysExDiffCommand") << endmsg;
+					}
+
+				} else if (n->name() == "PatchChangeDiffCommand") {
+
+					PBD::ID id (n->property("midi-source")->value());
+					boost::shared_ptr<MidiSource> midi_source =
+						boost::dynamic_pointer_cast<MidiSource, Source>(source_by_id(id));
+					if (midi_source) {
+						ut->add_command (new MidiModel::PatchChangeDiffCommand (midi_source->model(), *n));
+					} else {
+						error << _("Failed to downcast MidiSource for PatchChangeDiffCommand") << endmsg;
+					}
+
+				} else if (n->name() == "StatefulDiffCommand") {
+					if ((c = stateful_diff_command_factory (n))) {
+						ut->add_command (c);
+					}
+				} else {
+					error << string_compose(_("Couldn't figure out how to make a Command out of a %1 XMLNode."), n->name()) << endmsg;
+				}
+			}
+
+			_history.add (ut);
 		}
 
-		_history.add (ut);
+	} catch (std::exception const & e) {
+		error << string_compose (_("Error during loading undo history (%1). Undo history will be ignored"), e.what()) << endmsg;
 	}
 
 	return 0;
@@ -4125,14 +4235,6 @@ Session::config_changed (std::string p, bool ours)
 			} else {
 				clear_events (SessionEvent::PunchOut);
 			}
-		}
-
-	} else if (p == "edit-mode") {
-
-		Glib::Threads::Mutex::Lock lm (_playlists->lock);
-
-		for (SessionPlaylists::List::iterator i = _playlists->playlists.begin(); i != _playlists->playlists.end(); ++i) {
-			(*i)->set_edit_mode (Config->get_edit_mode ());
 		}
 
 	} else if (p == "use-video-sync") {
@@ -5460,7 +5562,7 @@ Session::archive_session (const std::string& dest,
 				continue;
 			}
 			boost::shared_ptr<AudioFileSource> afs = boost::dynamic_pointer_cast<AudioFileSource> (i->second);
-			if (!afs || afs->readable_length () == 0) {
+			if (!afs || afs->length ().is_zero ()) {
 				continue;
 			}
 			if (only_used_sources) {
@@ -5479,7 +5581,7 @@ Session::archive_session (const std::string& dest,
 				continue;
 			}
 			boost::shared_ptr<AudioFileSource> afs = boost::dynamic_pointer_cast<AudioFileSource> (i->second);
-			if (!afs || afs->readable_length () == 0) {
+			if (!afs || afs->length ().is_zero ()) {
 				continue;
 			}
 
@@ -5495,7 +5597,7 @@ Session::archive_session (const std::string& dest,
 			std::string from = afs->path();
 
 			if (compress_audio != NO_ENCODE) {
-				total_size += afs->readable_length ();
+				total_size += afs->readable_length_samples ();
 			} else {
 				/* copy files as-is */
 				if (!afs->within_session()) {
@@ -5543,7 +5645,7 @@ Session::archive_session (const std::string& dest,
 				continue;
 			}
 			boost::shared_ptr<AudioFileSource> afs = boost::dynamic_pointer_cast<AudioFileSource> (i->second);
-			if (!afs || afs->readable_length () == 0) {
+			if (!afs || afs->length ().is_zero ()) {
 				continue;
 			}
 
@@ -5578,7 +5680,7 @@ Session::archive_session (const std::string& dest,
 			}
 
 			if (progress) {
-				progress->descend ((float)afs->readable_length () / total_size);
+				progress->descend ((float)afs->readable_length_samples () / total_size);
 			}
 
 			try {

@@ -55,21 +55,7 @@ MidiStretch::run (boost::shared_ptr<Region> r, Progress*)
 		return -1;
 	}
 
-	const TempoMap& tmap (session.tempo_map ());
-
-	/* Fraction is based on sample-time, while MIDI source
-	 * is always using music-time. This matters in case there is
-	 * a tempo-ramp. So we need to scale the ratio to music-time */
-	const double mtfrac =
-		tmap.framewalk_to_qn (region->position (), region->length () * _request.time_fraction).to_double ()
-		/
-		tmap.framewalk_to_qn (region->position (), region->length ()).to_double ();
-
-	/* the name doesn't need to be super-precise, but allow for 2 fractional
-	 * digits just to disambiguate close but not identical stretches.
-	 */
-
-	snprintf (suffix, sizeof (suffix), "@%d", (int) floor (mtfrac * 100.0f));
+	snprintf (suffix, sizeof (suffix), "@%d", (int) floor ((_request.time_fraction.numerator()/ (double) _request.time_fraction.denominator()) * 100.0f));
 
 	string new_name = region->name();
 	string::size_type at = new_name.find ('@');
@@ -84,31 +70,26 @@ MidiStretch::run (boost::shared_ptr<Region> r, Progress*)
 
 	/* create new sources */
 
-	if (make_new_sources (region, nsrcs, suffix))
+	if (make_new_sources (region, nsrcs, suffix)) {
 		return -1;
-
-	boost::shared_ptr<MidiSource> src = region->midi_source(0);
-	{
-		Source::Lock lock(src->mutex());
-		src->load_model(lock);
 	}
 
-	boost::shared_ptr<MidiModel> old_model = src->model();
+	boost::shared_ptr<MidiSource> src = region->midi_source(0);
+	Source::ReaderLock lock (src->mutex());
 
+	boost::shared_ptr<MidiModel> old_model = src->model();
 	boost::shared_ptr<MidiSource> new_src = boost::dynamic_pointer_cast<MidiSource>(nsrcs[0]);
+
 	if (!new_src) {
 		error << _("MIDI stretch created non-MIDI source") << endmsg;
 		return -1;
 	}
 
-	Glib::Threads::Mutex::Lock sl (new_src->mutex ());
+	Source::WriterLock sl (new_src->mutex ());
 
-	new_src->load_model(sl, true);
+	new_src->load_model (sl, true);
 	boost::shared_ptr<MidiModel> new_model = new_src->model();
 	new_model->start_write();
-
-	const double r_start = tmap.quarter_notes_between_samples (region->position () - region->start (), region->position ());
-	const double r_end = r_start + tmap.quarter_notes_between_samples (region->position (), region->position () + region->length ());
 
 #ifdef DEBUG_MIDI_STRETCH
 	printf ("stretch start: %f end: %f  [* %f] * %f\n", r_start, r_end, _request.time_fraction, mtfrac);
@@ -117,33 +98,18 @@ MidiStretch::run (boost::shared_ptr<Region> r, Progress*)
 	/* Note: pass true into force_discrete for the begin() iterator so that the model doesn't
 	 * do interpolation of controller data when we stretch.
 	 */
+	MidiModel::TimeType final_time;
+
 	for (Evoral::Sequence<MidiModel::TimeType>::const_iterator i = old_model->begin (MidiModel::TimeType(), true); i != old_model->end(); ++i) {
 
-		if (i->time() < r_start) {
-#ifdef DEBUG_MIDI_STRETCH
-			cout << "SKIP EARLY EVENT " << i->time() << "\n";
-#endif
-			continue;
-		}
-		if (i->time() > r_end) {
-#ifdef DEBUG_MIDI_STRETCH
-			cout << "SKIP LATE EVENT " << i->time() << "\n";
-			continue;
-#else
-			break;
-#endif
-		}
-
-#ifdef DEBUG_MIDI_STRETCH
-		cout << "STRETCH " << i->time() << " OFFSET FROM START @ " << r_start << " = " << (i->time() - r_start) << " TO " << (i->time() - r_start) * mtfrac << "\n";
-#endif
-
-		const MidiModel::TimeType new_time = (i->time() - r_start) * mtfrac;
+		const MidiModel::TimeType new_time = i->time() * _request.time_fraction;
 
 		// FIXME: double copy
 		Evoral::Event<MidiModel::TimeType> ev(*i, true);
-		ev.set_time(new_time);
+		ev.set_time (new_time);
 		new_model->append(ev, Evoral::next_event_id());
+
+		final_time = max (final_time, new_time);
 	}
 
 	new_model->end_write (Evoral::Sequence<Temporal::Beats>::ResolveStuckNotes);
@@ -153,11 +119,9 @@ MidiStretch::run (boost::shared_ptr<Region> r, Progress*)
 
 	const int ret = finish (region, nsrcs, new_name);
 
-	/* non-musical */
-	results[0]->set_start(0);
-	results[0]->set_position (r->position ()); // force updates the region's quarter-note position
-	results[0]->set_length((samplecnt_t) floor (r->length() * _request.time_fraction), 0);
+	/* set length of new region to precisely match source length */
+
+	results[0]->set_length (region->length() * _request.time_fraction);
 
 	return ret;
 }
-

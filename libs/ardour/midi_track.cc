@@ -40,7 +40,9 @@
 #include "evoral/midi_util.h"
 
 #include "ardour/amp.h"
-#include "ardour/beats_samples_converter.h"
+#ifdef HAVE_BEATBOX
+#include "ardour/beatbox.h"
+#endif
 #include "ardour/buffer_set.h"
 #include "ardour/debug.h"
 #include "ardour/delivery.h"
@@ -109,6 +111,11 @@ MidiTrack::init ()
 	_disk_reader->reset_tracker ();
 
 	_disk_writer->DataRecorded.connect_same_thread (*this, boost::bind (&MidiTrack::data_recorded, this, _1));
+
+#ifdef HAVE_BEATBOX
+	_beatbox.reset (new BeatBox (_session));
+	add_processor (_beatbox, PostFader);
+#endif
 
 	return 0;
 }
@@ -221,7 +228,7 @@ MidiTrack::set_state (const XMLNode& node, int version)
 }
 
 XMLNode&
-MidiTrack::state(bool save_template)
+MidiTrack::state(bool save_template) const
 {
 	XMLNode& root (Track::state (save_template));
 	XMLNode* freeze_node;
@@ -235,7 +242,7 @@ MidiTrack::state(bool save_template)
 		freeze_node->set_property ("playlist-id", _freeze_record.playlist->id().to_s());
 		freeze_node->set_property ("state", _freeze_record.state);
 
-		for (vector<FreezeRecordProcessorInfo*>::iterator i = _freeze_record.processor_info.begin(); i != _freeze_record.processor_info.end(); ++i) {
+		for (vector<FreezeRecordProcessorInfo*>::const_iterator i = _freeze_record.processor_info.begin(); i != _freeze_record.processor_info.end(); ++i) {
 			inode = new XMLNode (X_("processor"));
 			inode->set_property (X_("id"), id());
 			inode->add_child_copy ((*i)->state);
@@ -366,8 +373,8 @@ MidiTrack::update_controls (BufferSet const& bufs)
 		const Evoral::Parameter                  param   = midi_parameter(ev.buffer(), ev.size());
 		const boost::shared_ptr<AutomationControl> control = automation_control (param);
 		if (control) {
-			double old = control->get_double (false, 0);
-			control->set_double (ev.value(), 0, false);
+			double old = control->get_double (false, timepos_t::zero (true));
+			control->set_double (ev.value(), timepos_t::zero (false), false);
 			if (old != ev.value()) {
 				control->Changed (false, Controllable::NoGroup);
 			}
@@ -402,9 +409,11 @@ MidiTrack::realtime_locate (bool for_loop_end)
 }
 
 void
-MidiTrack::non_realtime_locate (samplepos_t pos)
+MidiTrack::non_realtime_locate (samplepos_t spos)
 {
-	Track::non_realtime_locate(pos);
+	timepos_t pos (spos);
+
+	Track::non_realtime_locate (spos);
 
 	boost::shared_ptr<MidiPlaylist> playlist = _disk_writer->midi_playlist();
 	if (!playlist) {
@@ -412,7 +421,7 @@ MidiTrack::non_realtime_locate (samplepos_t pos)
 	}
 
 	/* Get the top unmuted region at this position. */
-	boost::shared_ptr<MidiRegion> region = boost::dynamic_pointer_cast<MidiRegion>(playlist->top_unmuted_region_at(pos));
+	boost::shared_ptr<MidiRegion> region = boost::dynamic_pointer_cast<MidiRegion> (playlist->top_unmuted_region_at (pos));
 
 	if (!region) {
 		return;
@@ -429,8 +438,7 @@ MidiTrack::non_realtime_locate (samplepos_t pos)
 	}
 
 	/* Update track controllers based on its "automation". */
-	const samplepos_t     origin = region->position() - region->start();
-	BeatsSamplesConverter bfc(_session.tempo_map(), origin);
+	const timepos_t pos_beats = timepos_t (region->source_position().distance (pos).beats ()); /* relative to source start */
 
 	for (Controls::const_iterator c = _controls.begin(); c != _controls.end(); ++c) {
 
@@ -446,9 +454,9 @@ MidiTrack::non_realtime_locate (samplepos_t pos)
 		if ((tcontrol = boost::dynamic_pointer_cast<MidiTrack::MidiControl>(c->second)) &&
 
 		    (rcontrol = region->control(tcontrol->parameter()))) {
-			const Temporal::Beats pos_beats = bfc.from(pos - origin);
+
 			if (rcontrol->list()->size() > 0) {
-				tcontrol->set_value(rcontrol->list()->eval(pos_beats.to_double()), Controllable::NoGroup);
+				tcontrol->set_value(rcontrol->list()->eval(pos_beats), Controllable::NoGroup);
 			}
 		}
 	}
@@ -520,7 +528,7 @@ MidiTrack::export_stuff (BufferSet&                   buffers,
                          bool                         include_endpoint,
                          bool                         for_export,
                          bool                         for_freeze,
-                         MidiStateTracker&            tracker)
+                         MidiNoteTracker&            tracker)
 {
 	if (buffers.count().n_midi() == 0) {
 		return -1;
@@ -539,7 +547,7 @@ MidiTrack::export_stuff (BufferSet&                   buffers,
 	 * subsequent call
 	 */
 
-	MidiStateTracker ignored;
+	MidiNoteTracker ignored;
 
 	/* XXX this doesn't fail, other than if the lock cannot be obtained */
 	mpl->rendered()->read (buffers.get_midi(0), start, start+nframes, ignored, start);

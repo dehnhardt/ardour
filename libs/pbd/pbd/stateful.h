@@ -51,10 +51,10 @@ class LIBPBD_API Stateful {
 	Stateful ();
 	virtual ~Stateful();
 
-	virtual XMLNode& get_state (void) = 0;
+	virtual XMLNode& get_state () const = 0;
 	virtual int set_state (const XMLNode&, int version) = 0;
 
-	virtual bool apply_changes (PropertyBase const &);
+	virtual bool apply_change (PropertyBase const &);
 	PropertyChange apply_changes (PropertyList const &);
 
 	const OwnedPropertyList& properties() const { return *_properties; }
@@ -105,13 +105,13 @@ class LIBPBD_API Stateful {
 	virtual void suspend_property_changes ();
 	virtual void resume_property_changes ();
 
-	bool property_changes_suspended() const { return g_atomic_int_get (&_stateful_frozen) > 0; }
+	bool property_changes_suspended() const { return g_atomic_int_get (const_cast<GATOMIC_QUAL gint*> (&_stateful_frozen)) > 0; }
 
   protected:
 
 	void add_instant_xml (XMLNode&, const std::string& directory_path);
 	XMLNode *instant_xml (const std::string& str, const std::string& directory_path);
-	void add_properties (XMLNode &);
+	void add_properties (XMLNode &) const;
 
 	PropertyChange set_values (XMLNode const &);
 

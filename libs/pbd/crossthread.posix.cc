@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2014-2016 Paul Davis <paul@linuxaudiosystems.com>
- * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2022 Robin Gareus <robin@gareus.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,8 +20,8 @@
 #include <poll.h>
 
 CrossThreadChannel::CrossThreadChannel (bool non_blocking)
-        : receive_channel (0)
-        , receive_source (0)
+	: receive_channel (0)
+	, receive_source (0)
 {
 	fds[0] = -1;
 	fds[1] = -1;
@@ -43,7 +43,7 @@ CrossThreadChannel::CrossThreadChannel (bool non_blocking)
 		}
 	}
 
-        receive_channel = g_io_channel_unix_new (fds[0]);
+	receive_channel = g_io_channel_unix_new (fds[0]);
 }
 
 CrossThreadChannel::~CrossThreadChannel ()
@@ -57,9 +57,9 @@ CrossThreadChannel::~CrossThreadChannel ()
 	}
 
 	if (receive_channel) {
-                g_io_channel_unref (receive_channel);
-                receive_channel = 0;
-        }
+		g_io_channel_unref (receive_channel);
+		receive_channel = 0;
+	}
 
 	if (fds[0] >= 0) {
 		close (fds[0]);
@@ -76,7 +76,7 @@ void
 CrossThreadChannel::wakeup ()
 {
 	char c = 0;
-	(void) ::write (fds[1], &c, 1);
+	(void)::write (fds[1], &c, 1);
 }
 
 void
@@ -89,27 +89,37 @@ CrossThreadChannel::drain ()
 int
 CrossThreadChannel::deliver (char msg)
 {
-        return ::write (fds[1], &msg, 1);
+	return ::write (fds[1], &msg, 1);
 }
 
 bool
-CrossThreadChannel::poll_for_request()
+CrossThreadChannel::poll_for_request ()
 {
-	struct pollfd pfd[1];
-	pfd[0].fd = fds[0];
-	pfd[0].events = POLLIN|POLLERR|POLLHUP;
-	while(true) {
-		if (poll (pfd, 1, -1) < 0) {
+	struct pollfd pfd;
+	pfd.fd     = fds[0];
+	pfd.events = POLLIN | POLLERR | POLLHUP | POLLNVAL;
+	while (true) {
+#ifdef __APPLE__
+		/* on macOS poll() will not return when the pipe
+		 * is closed in an EOF state. ork around with a timeout.
+		 */
+		int rv = poll (&pfd, 1, 1000);
+#else
+		int rv = poll (&pfd, 1, -1);
+#endif
+		if (rv == -1) {
+			/* error */
 			if (errno == EINTR) {
 				continue;
 			}
 			break;
 		}
-		if (pfd[0].revents & ~POLLIN) {
+
+		if (pfd.revents & ~POLLIN) {
 			break;
 		}
 
-		if (pfd[0].revents & POLLIN) {
+		if (rv > 0 && pfd.revents & POLLIN) {
 			return true;
 		}
 	}
@@ -124,5 +134,5 @@ CrossThreadChannel::receive (char& msg, bool wait)
 			return -1;
 		}
 	}
-        return ::read (fds[0], &msg, 1);
+	return ::read (fds[0], &msg, 1);
 }

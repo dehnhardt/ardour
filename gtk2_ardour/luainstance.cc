@@ -432,7 +432,7 @@ lua_forkexec (lua_State *L)
 	}
 	args[argc] = 0;
 
-	ARDOUR::SystemExec* x = new ARDOUR::SystemExec (args[0], args);
+	ARDOUR::SystemExec* x = new ARDOUR::SystemExec (args[0], args, true);
 	x->Terminated.connect (_luaexecs, MISSING_INVALIDATOR, boost::bind (&reaper, x), gui_context());
 
 	if (x->start()) {
@@ -455,7 +455,7 @@ lua_exec (std::string cmd)
 	args[1] = strdup ("-c");
 	args[2] = strdup (cmd.c_str());
 	args[3] = 0;
-	ARDOUR::SystemExec x ("/bin/sh", args);
+	ARDOUR::SystemExec x ("/bin/sh", args, true);
 	if (x.start()) {
 		return -1;
 	}
@@ -846,14 +846,16 @@ LuaInstance::register_classes (lua_State* L)
 
 
 		.beginClass <RegionSelection> ("RegionSelection")
-		.addFunction ("start", &RegionSelection::start)
-		.addFunction ("end_sample", &RegionSelection::end_sample)
+		.addFunction ("start_time", &RegionSelection::start_time)
+		.addFunction ("end_time", &RegionSelection::end_time)
 		.addFunction ("n_midi_regions", &RegionSelection::n_midi_regions)
 		.addFunction ("regionlist", &RegionSelection::regionlist) // XXX check windows binding (libardour)
 		.endClass ()
 
-		.deriveClass <TimeSelection, std::list<ARDOUR::AudioRange> > ("TimeSelection")
-		.addFunction ("start", &TimeSelection::start)
+		.deriveClass <TimeSelection, std::list<ARDOUR::TimelineRange> > ("TimeSelection")
+		.addFunction ("start_time", &TimeSelection::start_time)
+		.addFunction ("end_time", &TimeSelection::end_time)
+		.addFunction ("start_sample", &TimeSelection::start_sample)
 		.addFunction ("end_sample", &TimeSelection::end_sample)
 		.addFunction ("length", &TimeSelection::length)
 		.endClass ()
@@ -998,6 +1000,7 @@ LuaInstance::register_classes (lua_State* L)
 		.addFunction ("get_paste_offset", &PublicEditor::get_paste_offset)
 		.addFunction ("get_grid_beat_divisions", &PublicEditor::get_grid_beat_divisions)
 		.addRefFunction ("get_grid_type_as_beats", &PublicEditor::get_grid_type_as_beats)
+		.addRefFunction ("get_draw_length_as_beats", &PublicEditor::get_draw_length_as_beats)
 
 		.addFunction ("toggle_ruler_video", &PublicEditor::toggle_ruler_video)
 		.addFunction ("toggle_xjadeo_proc", &PublicEditor::toggle_xjadeo_proc)
@@ -2034,7 +2037,7 @@ LuaCallback::~LuaCallback ()
 }
 
 XMLNode&
-LuaCallback::get_state (void)
+LuaCallback::get_state () const
 {
 	std::string saved;
 	{
@@ -2346,6 +2349,14 @@ LuaCallback::connect_3 (enum LuaSignal::LuaSignal ls, T ref, PBD::Signal3<void, 
 			gui_context());
 }
 
+template <typename T, typename C1, typename C2, typename C3, typename C4> void
+LuaCallback::connect_4 (enum LuaSignal::LuaSignal ls, T ref, PBD::Signal4<void, C1, C2, C3, C4> *signal) {
+	signal->connect (
+			_connections, invalidator (*this),
+			boost::bind (&LuaCallback::proxy_4<T, C1, C2, C3, C4>, this, ls, ref, _1, _2, _3, _4),
+			gui_context());
+}
+
 template <typename T> void
 LuaCallback::proxy_0 (enum LuaSignal::LuaSignal ls, T ref) {
 	bool ok = true;
@@ -2394,6 +2405,20 @@ LuaCallback::proxy_3 (enum LuaSignal::LuaSignal ls, T ref, C1 a1, C2 a2, C3 a3) 
 	bool ok = true;
 	{
 		const luabridge::LuaRef& rv ((*_lua_call)((int)ls, ref, a1, a2, a3));
+		if (! rv.cast<bool> ()) {
+			ok = false;
+		}
+	}
+	if (!ok) {
+		drop_callback (); /* EMIT SIGNAL */
+	}
+}
+
+template <typename T, typename C1, typename C2, typename C3, typename C4> void
+LuaCallback::proxy_4 (enum LuaSignal::LuaSignal ls, T ref, C1 a1, C2 a2, C3 a3, C4 a4) {
+	bool ok = true;
+	{
+		const luabridge::LuaRef& rv ((*_lua_call)((int)ls, ref, a1, a2, a3, a4));
 		if (! rv.cast<bool> ()) {
 			ok = false;
 		}

@@ -59,7 +59,7 @@ RegionFactory::create (boost::shared_ptr<const Region> region, bool announce, bo
 	boost::shared_ptr<const MidiRegion>  mr;
 
 	if ((ar = boost::dynamic_pointer_cast<const AudioRegion> (region)) != 0) {
-		ret = boost::shared_ptr<Region> (new AudioRegion (ar, MusicSample (0, 0)));
+		ret = boost::shared_ptr<Region> (new AudioRegion (ar, timecnt_t::from_superclock (0)));
 
 	} else if ((mr = boost::dynamic_pointer_cast<const MidiRegion> (region)) != 0) {
 		if (mr->session ().config.get_midi_copy_is_fork () || fork) {
@@ -75,7 +75,7 @@ RegionFactory::create (boost::shared_ptr<const Region> region, bool announce, bo
 			source->set_ancestor_name (mr->sources ().front ()->name ());
 			ret = mr->clone (source, tl);
 		} else {
-			ret = boost::shared_ptr<Region> (new MidiRegion (mr, MusicSample (0, 0)));
+			ret = boost::shared_ptr<Region> (new MidiRegion (mr, timecnt_t (Temporal::Beats (), timepos_t (Temporal::Beats()))));
 		}
 
 	} else {
@@ -91,8 +91,8 @@ RegionFactory::create (boost::shared_ptr<const Region> region, bool announce, bo
 
 		ret->set_name (new_region_name (ret->name ()));
 
-		if (ret->session ().config.get_glue_new_regions_to_bars_and_beats () && ret->position_lock_style () != MusicTime) {
-			ret->set_position_lock_style (MusicTime);
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_time_domain() != Temporal::BeatTime) {
+			ret->set_position_time_domain (Temporal::BeatTime);
 		}
 
 		/* pure copy constructor - no property list */
@@ -133,8 +133,8 @@ RegionFactory::create (boost::shared_ptr<Region> region, const PropertyList& pli
 
 		ret->apply_changes (plist);
 
-		if (ret->session ().config.get_glue_new_regions_to_bars_and_beats () && ret->position_lock_style () != MusicTime) {
-			ret->set_position_lock_style (MusicTime);
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_time_domain() != Temporal::BeatTime) {
+			ret->set_position_time_domain (Temporal::BeatTime);
 		}
 
 		if (announce) {
@@ -148,7 +148,7 @@ RegionFactory::create (boost::shared_ptr<Region> region, const PropertyList& pli
 }
 
 boost::shared_ptr<Region>
-RegionFactory::create (boost::shared_ptr<Region> region, MusicSample offset, const PropertyList& plist, bool announce, ThawList* tl)
+RegionFactory::create (boost::shared_ptr<Region> region, timecnt_t const & offset, const PropertyList& plist, bool announce, ThawList* tl)
 {
 	boost::shared_ptr<Region>            ret;
 	boost::shared_ptr<const AudioRegion> other_a;
@@ -173,8 +173,8 @@ RegionFactory::create (boost::shared_ptr<Region> region, MusicSample offset, con
 		}
 		ret->apply_changes (plist);
 
-		if (ret->session ().config.get_glue_new_regions_to_bars_and_beats () && ret->position_lock_style () != MusicTime) {
-			ret->set_position_lock_style (MusicTime);
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_time_domain() != Temporal::BeatTime) {
+			ret->set_position_time_domain (Temporal::BeatTime);
 		}
 
 		if (announce) {
@@ -215,8 +215,8 @@ RegionFactory::create (boost::shared_ptr<Region> region, const SourceList& srcs,
 
 		ret->apply_changes (plist);
 
-		if (ret->session ().config.get_glue_new_regions_to_bars_and_beats () && ret->position_lock_style () != MusicTime) {
-			ret->set_position_lock_style (MusicTime);
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_time_domain() != Temporal::BeatTime) {
+			ret->set_position_time_domain (Temporal::BeatTime);
 		}
 
 		if (announce) {
@@ -258,8 +258,8 @@ RegionFactory::create (const SourceList& srcs, const PropertyList& plist, bool a
 
 		ret->apply_changes (plist);
 
-		if (ret->session ().config.get_glue_new_regions_to_bars_and_beats () && ret->position_lock_style () != MusicTime) {
-			ret->set_position_lock_style (MusicTime);
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_time_domain() != Temporal::BeatTime) {
+			ret->set_position_time_domain (Temporal::BeatTime);
 		}
 
 		if (announce) {

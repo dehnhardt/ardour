@@ -88,7 +88,7 @@ public:
 
 	int set_active (bool yn);
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	void stripable_selection_changed () {}
@@ -127,6 +127,8 @@ public:
 
 	PBD::Signal1<void, unsigned short> ButtonPress;
 	PBD::Signal1<void, unsigned short> ButtonRelease;
+
+	CONTROL_PROTOCOL_THREADS_NEED_TEMPO_MAP_DECL();
 
 private:
 	void do_request (ContourDesignControlUIRequest*);

@@ -175,14 +175,6 @@ RouteTimeAxisView::set_route (boost::shared_ptr<Route> rt)
 		set_height (preset_height (HeightNormal));
 	}
 
-	if (!_route->is_auditioner()) {
-		if (gui_property ("visible").empty()) {
-			set_gui_property ("visible", true);
-		}
-	} else {
-		set_gui_property ("visible", false);
-	}
-
 	timestretch_rect = 0;
 	no_redraw = false;
 
@@ -478,7 +470,7 @@ RouteTimeAxisView::update_track_number_visibility ()
 		}
 		// see ArdourButton::on_size_request(), we should probably use a global size-group here instead.
 		// except the width of the number label is subtracted from the name-hbox, so we
-		// need to explictly calculate it anyway until the name-label & entry become ArdourWidgets.
+		// need to explicitly calculate it anyway until the name-label & entry become ArdourWidgets.
 		int tnw = (2 + std::max(2u, _session->track_number_decimals())) * number_label.char_pixel_width();
 		if (tnw & 1) --tnw;
 		number_label.set_size_request(tnw, -1);
@@ -837,13 +829,17 @@ RouteTimeAxisView::build_display_menu ()
 
 	int active = 0;
 	int inactive = 0;
+	bool always_active = false;
 	TrackSelection const & s = _editor.get_selection().tracks;
 	for (TrackSelection::const_iterator i = s.begin(); i != s.end(); ++i) {
 		RouteTimeAxisView* r = dynamic_cast<RouteTimeAxisView*> (*i);
 		if (!r) {
 			continue;
 		}
-
+		always_active |= r->route()->is_master();
+#ifdef MIXBUS
+		always_active |= r->route()->mixbus() != 0;
+#endif
 		if (r->route()->active()) {
 			++active;
 		} else {
@@ -860,7 +856,7 @@ RouteTimeAxisView::build_display_menu ()
 	} else if (active > 0 && inactive > 0) {
 		i->set_inconsistent (true);
 	}
-	i->set_sensitive(! _session->transport_rolling());
+	i->set_sensitive(! _session->transport_rolling() && ! always_active);
 	i->signal_activate().connect (sigc::bind (sigc::mem_fun (*this, &RouteUI::set_route_active), click_sets_active, true));
 
 	items.push_back (SeparatorElem());
@@ -892,7 +888,7 @@ RouteTimeAxisView::layer_display_menu_change (Gtk::MenuItem* item)
 }
 
 void
-RouteTimeAxisView::show_timestretch (samplepos_t start, samplepos_t end, int layers, int layer)
+RouteTimeAxisView::show_timestretch (timepos_t const & start, timepos_t const & end, int layers, int layer)
 {
 	TimeAxisView::show_timestretch (start, end, layers, layer);
 
@@ -929,8 +925,13 @@ RouteTimeAxisView::show_timestretch (samplepos_t start, samplepos_t end, int lay
 	timestretch_rect->show ();
 	timestretch_rect->raise_to_top ();
 
-	double const x1 = start / _editor.get_current_zoom();
-	double const x2 = (end - 1) / _editor.get_current_zoom();
+	/* we use samples here since that is the canonical GUI<=>timeline
+	 * mapping (samples/pixels). This is just a dragging rect, it doesn't
+	 * by itself determine the parameters for the stretch.
+	 */
+
+	double const x1 = start.samples() / _editor.get_current_zoom();
+	double const x2 = (end.samples() - 1) / _editor.get_current_zoom();
 
 	timestretch_rect->set (ArdourCanvas::Rect (x1, current_height() * (layers - layer - 1) / layers,
 						   x2, current_height() * (layers - layer) / layers));
@@ -967,7 +968,7 @@ RouteTimeAxisView::show_selection (TimeSelection& ts)
 }
 
 void
-RouteTimeAxisView::set_height (uint32_t h, TrackHeightMode m)
+RouteTimeAxisView::set_height (uint32_t h, TrackHeightMode m, bool from_idle)
 {
 	int gmlen = h - 9;
 	bool height_changed = (height == 0) || (h != height);
@@ -978,7 +979,7 @@ RouteTimeAxisView::set_height (uint32_t h, TrackHeightMode m)
 	}
 	gm.get_level_meter().setup_meters (gmlen, meter_width);
 
-	TimeAxisView::set_height (h, m);
+	TimeAxisView::set_height (h, m, from_idle);
 
 	if (_view) {
 		_view->set_height ((double) current_height());
@@ -1156,7 +1157,7 @@ RouteTimeAxisView::set_selected_regionviews (RegionSelection& regions)
  * @param results List to add things to.
  */
 void
-RouteTimeAxisView::get_selectables (samplepos_t start, samplepos_t end, double top, double bot, list<Selectable*>& results, bool within)
+RouteTimeAxisView::get_selectables (timepos_t const & start, timepos_t const & end, double top, double bot, list<Selectable*>& results, bool within)
 {
 	if ((_view && ((top < 0.0 && bot < 0.0))) || touched (top, bot)) {
 		_view->get_selectables (start, end, top, bot, results, within);
@@ -1177,6 +1178,16 @@ RouteTimeAxisView::get_inverted_selectables (Selection& sel, list<Selectable*>& 
 		_view->get_inverted_selectables (sel, results);
 	}
 	StripableTimeAxisView::get_inverted_selectables (sel, results);
+}
+
+void
+RouteTimeAxisView::get_regionviews_at_or_after (timepos_t const & pos, RegionSelection& regions)
+{
+	if (!_view) {
+		return;
+	}
+
+	_view->get_regionviews_at_or_after (pos, regions);
 }
 
 RouteGroup*
@@ -1224,7 +1235,7 @@ RouteTimeAxisView::name_entry_changed (string const& str)
 }
 
 boost::shared_ptr<Region>
-RouteTimeAxisView::find_next_region (samplepos_t pos, RegionPoint point, int32_t dir)
+RouteTimeAxisView::find_next_region (timepos_t const & pos, RegionPoint point, int32_t dir)
 {
 	boost::shared_ptr<Playlist> pl = playlist ();
 
@@ -1235,8 +1246,8 @@ RouteTimeAxisView::find_next_region (samplepos_t pos, RegionPoint point, int32_t
 	return boost::shared_ptr<Region> ();
 }
 
-samplepos_t
-RouteTimeAxisView::find_next_region_boundary (samplepos_t pos, int32_t dir)
+timepos_t
+RouteTimeAxisView::find_next_region_boundary (timepos_t const & pos, int32_t dir)
 {
 	boost::shared_ptr<Playlist> pl = playlist ();
 
@@ -1244,7 +1255,7 @@ RouteTimeAxisView::find_next_region_boundary (samplepos_t pos, int32_t dir)
 		return pl->find_next_region_boundary (pos, dir);
 	}
 
-	return -1;
+	return timepos_t::max (pos.time_domain());
 }
 
 void
@@ -1297,32 +1308,20 @@ RouteTimeAxisView::cut_copy_clear (Selection& selection, CutCopyOp op)
 	switch (op) {
 	case Delete:
 		if (playlist->cut (time) != 0) {
-			if (Config->get_edit_mode() == Ripple) {
-				playlist->ripple(time.start(), -time.length(), NULL);
+			if (_editor.should_ripple()) {
+				playlist->ripple (time.start_time(), -time.length(), NULL);
 			}
-			// no need to exclude any regions from rippling here
-
-			vector<Command*> cmds;
-			playlist->rdiff (cmds);
-			_session->add_commands (cmds);
-
-			_session->add_command (new StatefulDiffCommand (playlist));
+			playlist->rdiff_and_add_command (_session);
 		}
 		break;
 
 	case Cut:
 		if ((what_we_got = playlist->cut (time)) != 0) {
 			_editor.get_cut_buffer().add (what_we_got);
-			if (Config->get_edit_mode() == Ripple) {
-				playlist->ripple(time.start(), -time.length(), NULL);
+			if (_editor.should_ripple()) {
+				playlist->ripple (time.start_time(), -time.length(), NULL);
 			}
-			// no need to exclude any regions from rippling here
-
-			vector<Command*> cmds;
-			playlist->rdiff (cmds);
-			_session->add_commands (cmds);
-
-			_session->add_command (new StatefulDiffCommand (playlist));
+			playlist->rdiff_and_add_command (_session);
 		}
 		break;
 	case Copy:
@@ -1333,15 +1332,10 @@ RouteTimeAxisView::cut_copy_clear (Selection& selection, CutCopyOp op)
 
 	case Clear:
 		if ((what_we_got = playlist->cut (time)) != 0) {
-			if (Config->get_edit_mode() == Ripple) {
-				playlist->ripple(time.start(), -time.length(), NULL);
+			if (_editor.should_ripple()) {
+				playlist->ripple (time.start_time(), -time.length(), NULL);
 			}
-			// no need to exclude any regions from rippling here
-
-			vector<Command*> cmds;
-			playlist->rdiff (cmds);
-			_session->add_commands (cmds);
-			_session->add_command (new StatefulDiffCommand (playlist));
+			playlist->rdiff_and_add_command (_session);
 			what_we_got->release ();
 		}
 		break;
@@ -1349,7 +1343,7 @@ RouteTimeAxisView::cut_copy_clear (Selection& selection, CutCopyOp op)
 }
 
 bool
-RouteTimeAxisView::paste (samplepos_t pos, const Selection& selection, PasteContext& ctx, const int32_t sub_num)
+RouteTimeAxisView::paste (timepos_t const & pos, const Selection& selection, PasteContext& ctx)
 {
 	if (!is_track()) {
 		return false;
@@ -1367,18 +1361,20 @@ RouteTimeAxisView::paste (samplepos_t pos, const Selection& selection, PasteCont
 	DEBUG_TRACE (DEBUG::CutNPaste, string_compose ("paste to %1\n", pos));
 
 	/* add multi-paste offset if applicable */
-	std::pair<samplepos_t, samplepos_t> extent  = (*p)->get_extent();
-	const samplecnt_t                  duration = extent.second - extent.first;
-	pos += _editor.get_paste_offset(pos, ctx.count, duration);
+	std::pair<timepos_t, timepos_t> extent  = (*p)->get_extent();
+	const timecnt_t                 duration = extent.first.distance (extent.second);
+
+	timepos_t ppos = pos;
+	ppos += _editor.get_paste_offset (ppos, ctx.count, duration);
 
 	pl->clear_changes ();
 	pl->clear_owned_changes ();
-	if (Config->get_edit_mode() == Ripple) {
-		std::pair<samplepos_t, samplepos_t> extent = (*p)->get_extent_with_endspace();
-		samplecnt_t amount = extent.second - extent.first;
-		pl->ripple(pos, amount * ctx.times, boost::shared_ptr<Region>());
+	if (_editor.should_ripple()) {
+		std::pair<timepos_t, timepos_t> extent = (*p)->get_extent_with_endspace();
+		timecnt_t amount = extent.first.distance (extent.second);
+		pl->ripple (ppos, amount * ctx.times, boost::shared_ptr<Region>());
 	}
-	pl->paste (*p, pos, ctx.times, sub_num);
+	pl->paste (*p, ppos, ctx.times);
 
 	vector<Command*> cmds;
 	pl->rdiff (cmds);
@@ -2290,7 +2286,7 @@ void
 RouteTimeAxisView::io_changed (IOChange /*change*/, void */*src*/)
 {
 	reset_meter ();
-	if (_route && !no_redraw) {
+	if (_route && !no_redraw && !_session->routes_deletion_in_progress ()) {
 		request_redraw ();
 	}
 }

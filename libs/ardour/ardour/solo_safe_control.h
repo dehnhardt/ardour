@@ -34,14 +34,14 @@ class Session;
 class LIBARDOUR_API SoloSafeControl : public SlavableAutomationControl
 {
   public:
-	SoloSafeControl (Session& session, std::string const & name);
+	SoloSafeControl (Session& session, std::string const & name, Temporal::TimeDomain);
 
 	double get_value () const;
 
 	bool solo_safe() const { return _solo_safe; }
 
 	int set_state (XMLNode const&, int);
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 
   protected:
 	void actually_set_value (double, PBD::Controllable::GroupControlDisposition group_override);

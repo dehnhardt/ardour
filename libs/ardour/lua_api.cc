@@ -81,6 +81,12 @@ ARDOUR::LuaAPI::nil_processor ()
 boost::shared_ptr<Processor>
 ARDOUR::LuaAPI::new_luaproc (Session *s, const string& name)
 {
+	return new_luaproc_with_time_domain (s, name, Config->get_default_automation_time_domain());
+}
+
+boost::shared_ptr<Processor>
+ARDOUR::LuaAPI::new_luaproc_with_time_domain (Session *s, const string& name, Temporal::TimeDomain td)
+{
 	if (!s) {
 		return boost::shared_ptr<Processor> ();
 	}
@@ -108,7 +114,7 @@ ARDOUR::LuaAPI::new_luaproc (Session *s, const string& name)
 		return boost::shared_ptr<Processor> ();
 	}
 
-	return boost::shared_ptr<Processor> (new PluginInsert (*s, p));
+	return boost::shared_ptr<Processor> (new PluginInsert (*s, td, p));
 }
 
 boost::shared_ptr<Processor>
@@ -209,6 +215,12 @@ ARDOUR::LuaAPI::new_plugin_info (const string& name, ARDOUR::PluginType type)
 boost::shared_ptr<Processor>
 ARDOUR::LuaAPI::new_plugin (Session *s, const string& name, ARDOUR::PluginType type, const string& preset)
 {
+	return new_plugin_with_time_domain (s, name, type, Config->get_default_automation_time_domain(), preset);
+}
+
+boost::shared_ptr<Processor>
+ARDOUR::LuaAPI::new_plugin_with_time_domain (Session *s, const string& name, ARDOUR::PluginType type, Temporal::TimeDomain td, const string& preset)
+{
 	if (!s) {
 		return boost::shared_ptr<Processor> ();
 	}
@@ -231,7 +243,7 @@ ARDOUR::LuaAPI::new_plugin (Session *s, const string& name, ARDOUR::PluginType t
 		}
 	}
 
-	return boost::shared_ptr<Processor> (new PluginInsert (*s, p));
+	return boost::shared_ptr<Processor> (new PluginInsert (*s, td, p));
 }
 
 bool
@@ -913,7 +925,7 @@ LuaAPI::Vamp::initialize ()
 }
 
 int
-LuaAPI::Vamp::analyze (boost::shared_ptr<ARDOUR::Readable> r, uint32_t channel, luabridge::LuaRef cb)
+LuaAPI::Vamp::analyze (boost::shared_ptr<ARDOUR::AudioReadable> r, uint32_t channel, luabridge::LuaRef cb)
 {
 	if (!_initialized) {
 		if (!initialize ()) {
@@ -926,7 +938,7 @@ LuaAPI::Vamp::analyze (boost::shared_ptr<ARDOUR::Readable> r, uint32_t channel, 
 	float* data = new float[_bufsize];
 	float* bufs[1] = { data };
 
-	samplecnt_t len = r->readable_length();
+	samplecnt_t len = r->readable_length_samples();
 	samplepos_t pos = 0;
 
 	int rv = 0;
@@ -1003,9 +1015,9 @@ LuaAPI::Rubberband::Rubberband (boost::shared_ptr<AudioRegion> r, bool percussiv
 	, _cb (0)
 {
 	_n_channels  = r->n_channels ();
-	_read_len    = r->length () / (double)r->stretch ();
-	_read_start  = r->ancestral_start () + samplecnt_t (r->start () / (double)r->stretch ());
-	_read_offset = _read_start - r->start () + r->position ();
+	_read_len    = r->length_samples () / (double)r->stretch ();
+	_read_start  = r->ancestral_start_sample () + samplecnt_t (r->start_sample () / (double)r->stretch ());
+	_read_offset = _read_start - r->start_sample () + r->position_sample ();
 }
 
 LuaAPI::Rubberband::~Rubberband ()
@@ -1052,13 +1064,13 @@ LuaAPI::Rubberband::read (Sample* buf, samplepos_t pos, samplecnt_t cnt, int cha
 
 static void null_deleter (LuaAPI::Rubberband*) {}
 
-boost::shared_ptr<Readable>
+boost::shared_ptr<AudioReadable>
 LuaAPI::Rubberband::readable ()
 {
 	if (!_self) {
 		_self = boost::shared_ptr<Rubberband> (this, &null_deleter);
 	}
-	return boost::dynamic_pointer_cast<Readable> (_self);
+	return boost::dynamic_pointer_cast<AudioReadable> (_self);
 }
 
 bool
@@ -1205,7 +1217,7 @@ LuaAPI::Rubberband::finalize ()
 		boost::shared_ptr<AudioFileSource> afs = boost::dynamic_pointer_cast<AudioFileSource> (*i);
 		assert (afs);
 		afs->done_with_peakfile_writes ();
-		afs->update_header (_region->position (), *now, xnow);
+		afs->update_header (_region->position_sample (), *now, xnow);
 		afs->mark_immutable ();
 		Analyser::queue_source_for_analysis (*i, false);
 		sl.push_back (*i);
@@ -1216,10 +1228,9 @@ LuaAPI::Rubberband::finalize ()
 
 	PropertyList plist;
 	plist.add (Properties::start, 0);
-	plist.add (Properties::length, _region->length ());
+	plist.add (Properties::length, _region->length_samples ());
 	plist.add (Properties::name, region_name);
 	plist.add (Properties::whole_file, true);
-	plist.add (Properties::position, _region->position ());
 
 	boost::shared_ptr<Region>      r  = RegionFactory::create (sl, plist);
 	boost::shared_ptr<AudioRegion> ar = boost::dynamic_pointer_cast<AudioRegion> (r);
@@ -1231,9 +1242,10 @@ LuaAPI::Rubberband::finalize ()
 	ar->set_fade_out (_region->fade_out ());
 	*(ar->envelope ()) = *(_region->envelope ());
 
-	ar->set_ancestral_data (_read_start, _read_len, _stretch_ratio, _pitch_ratio);
+	ar->set_ancestral_data (timepos_t (_read_start), timecnt_t (_read_len), _stretch_ratio, _pitch_ratio);
 	ar->set_master_sources (_region->master_sources ());
-	ar->set_length (ar->length () * _stretch_ratio, 0); // XXX
+	ar->set_position (timepos_t (_region->position_sample ()));
+	ar->set_length (ar->length () * _stretch_ratio); // XXX
 	if (_stretch_ratio != 1.0) {
 		// TODO: apply mapping
 		ar->envelope ()->x_scale (_stretch_ratio);

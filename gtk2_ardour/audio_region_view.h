@@ -164,7 +164,6 @@ protected:
 
 	std::list<std::pair<samplepos_t, ArdourCanvas::Line*> > feature_lines;
 
-	ArdourCanvas::Polygon*          sync_mark; ///< polgyon for sync position
 	ArdourCanvas::Rectangle*        fade_in_handle; ///< fade in handle, or 0
 	ArdourCanvas::Rectangle*        fade_out_handle; ///< fade out handle, or 0
 	ArdourCanvas::Rectangle*        fade_in_trim_handle; ///< fade in trim handle, or 0
@@ -211,6 +210,7 @@ protected:
 	void transients_changed();
 
 	AutomationLine::VisibleAspects automation_line_visibility () const;
+	void _redisplay (bool) {}
 
 private:
 	void setup_fade_handle_positions ();

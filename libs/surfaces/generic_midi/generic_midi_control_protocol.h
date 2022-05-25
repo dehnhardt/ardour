@@ -87,7 +87,7 @@ public:
 
 	void maybe_start_touch (boost::shared_ptr<PBD::Controllable>);
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	bool has_editor () const { return true; }
@@ -96,6 +96,7 @@ public:
 
 	int load_bindings (const std::string&);
 	void drop_bindings ();
+	void drop_all ();
 
 	void check_used_event (int, int);
 
@@ -126,6 +127,8 @@ public:
 	}
 
 	PBD::Signal0<void> ConnectionChange;
+
+	CONTROL_PROTOCOL_THREADS_NEED_TEMPO_MAP_DECL();
 
 private:
 	boost::shared_ptr<ARDOUR::Bundle> _input_bundle;
@@ -161,7 +164,7 @@ private:
 	};
 	typedef std::list<MIDIPendingControllable* > MIDIPendingControllables;
 	MIDIPendingControllables pending_controllables;
-	Glib::Threads::Mutex controllables_lock;
+	mutable Glib::Threads::Mutex controllables_lock;
 	Glib::Threads::Mutex pending_lock;
 
 	bool start_learning (boost::weak_ptr<PBD::Controllable>);
@@ -174,7 +177,6 @@ private:
 	MIDIAction* create_action (const XMLNode&);
 
 	void reset_controllables ();
-	void drop_all ();
 
 	enum ConnectionState {
 		InputConnected = 0x1,

@@ -27,6 +27,8 @@
 #include <gtkmm/checkbutton.h>
 #include <gtkmm/spinbutton.h>
 
+#include "temporal/beats.h"
+
 #include "ardour/types.h"
 
 #include "ardour_dialog.h"
@@ -44,12 +46,12 @@ public:
 	QuantizeDialog (PublicEditor&);
 	~QuantizeDialog ();
 
-	double start_grid_size() const;
-	double end_grid_size() const;
+	Temporal::Beats start_grid_size() const;
+	Temporal::Beats end_grid_size() const;
 	bool   snap_start() const { return snap_start_button.get_active(); }
 	bool   snap_end() const { return snap_end_button.get_active(); }
 	float  strength() const;
-	float  threshold () const;
+	Temporal::Beats  threshold () const;
 	float  swing () const;
 
 private:
@@ -72,7 +74,7 @@ private:
 	static std::vector<std::string> grid_strings;
 	static std::vector<std::string> type_strings;
 
-	double grid_size_to_musical_time (const std::string&) const;
+	Temporal::Beats grid_size_to_musical_time (const std::string&) const;
 };
 
 #endif /* __ardour_gtk2_quantize_dialog_h_ */

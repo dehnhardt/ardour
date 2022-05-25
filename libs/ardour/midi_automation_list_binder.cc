@@ -25,11 +25,11 @@
 
 using namespace ARDOUR;
 
-MidiAutomationListBinder::MidiAutomationListBinder (boost::shared_ptr<MidiSource> s, Evoral::Parameter p)
-	: _source (s)
+MidiAutomationListBinder::MidiAutomationListBinder (MidiSource& s, Evoral::Parameter p)
+	: _source (&s)
 	, _parameter (p)
 {
-
+	_source->Destroyed.connect_same_thread (source_death_connection, boost::bind (&MidiAutomationListBinder::source_died, this));
 }
 
 MidiAutomationListBinder::MidiAutomationListBinder (XMLNode* node, Session::SourceMap const & sources)
@@ -44,13 +44,13 @@ MidiAutomationListBinder::MidiAutomationListBinder (XMLNode* node, Session::Sour
 
 	Session::SourceMap::const_iterator i = sources.find (PBD::ID (id_str));
 	assert (i != sources.end());
-	_source = boost::dynamic_pointer_cast<MidiSource> (i->second);
+	_source = (boost::dynamic_pointer_cast<MidiSource> (i->second)).get();
 
 	_parameter = EventTypeMap::instance().from_symbol (parameter_str);
 }
 
-AutomationList*
-MidiAutomationListBinder::get () const
+void
+MidiAutomationListBinder::set_state (XMLNode const & node, int version) const
 {
 	boost::shared_ptr<MidiModel> model = _source->model ();
 	assert (model);
@@ -58,8 +58,33 @@ MidiAutomationListBinder::get () const
 	boost::shared_ptr<AutomationControl> control = model->automation_control (_parameter);
 	assert (control);
 
-	return control->alist().get();
+	control->alist().get()->set_state (node, version);
 }
+
+XMLNode&
+MidiAutomationListBinder::get_state () const
+{
+	boost::shared_ptr<MidiModel> model = _source->model ();
+	assert (model);
+
+	boost::shared_ptr<AutomationControl> control = model->automation_control (_parameter);
+	assert (control);
+
+	return control->alist().get()->get_state ();
+}
+
+std::string
+MidiAutomationListBinder::type_name() const
+{
+	boost::shared_ptr<MidiModel> model = _source->model ();
+	assert (model);
+
+	boost::shared_ptr<AutomationControl> control = model->automation_control (_parameter);
+	assert (control);
+
+	return PBD::demangled_name (*control->alist().get());
+}
+
 
 void
 MidiAutomationListBinder::add_state (XMLNode* node)

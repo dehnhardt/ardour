@@ -380,21 +380,21 @@ ARDOUR_UI::parameter_changed (std::string p)
 		if (editor) editor->toggle_meter_updating();
 	} else if (p == "primary-clock-delta-mode") {
 		if (UIConfiguration::instance().get_primary_clock_delta_mode() != NoDelta) {
-			primary_clock->set_is_duration (true);
+			primary_clock->set_is_duration (true, timepos_t());
 			primary_clock->set_editable (false);
 			primary_clock->set_widget_name ("transport delta");
 		} else {
-			primary_clock->set_is_duration (false);
+			primary_clock->set_is_duration (false, timepos_t());
 			primary_clock->set_editable (true);
 			primary_clock->set_widget_name ("transport");
 		}
 	} else if (p == "secondary-clock-delta-mode") {
 		if (UIConfiguration::instance().get_secondary_clock_delta_mode() != NoDelta) {
-			secondary_clock->set_is_duration (true);
+			secondary_clock->set_is_duration (true, timepos_t());
 			secondary_clock->set_editable (false);
 			secondary_clock->set_widget_name ("secondary delta");
 		} else {
-			secondary_clock->set_is_duration (false);
+			secondary_clock->set_is_duration (false, timepos_t());
 			secondary_clock->set_editable (true);
 			secondary_clock->set_widget_name ("secondary");
 		}
@@ -425,6 +425,8 @@ ARDOUR_UI::parameter_changed (std::string p)
 	} else if (p == "show-toolbar-selclock") {
 		repack_transport_hbox ();
 	} else if (p == "show-toolbar-latency") {
+		repack_transport_hbox ();
+	} else if (p == "show-toolbar-cuectrl") {
 		repack_transport_hbox ();
 	} else if (p == "show-toolbar-monitor-info") {
 		repack_transport_hbox ();
@@ -461,6 +463,9 @@ ARDOUR_UI::parameter_changed (std::string p)
 		} else {
 			scripts_spacer.show ();
 		}
+	} else if (p == "cue-behavior") {
+		CueBehavior cb (_session->config.get_cue_behavior());
+		_cue_play_enable.set_active (cb & ARDOUR::FollowCues);
 	} else if (p == "layered-record-mode") {
 		layered_button.set_active (_session->config.get_layered_record_mode ());
 	} else if (p == "flat-buttons") {
@@ -494,6 +499,14 @@ ARDOUR_UI::parameter_changed (std::string p)
 				inhibit_screensaver (false);
 				break;
 		}
+	} else if (p == "clock-display-limit") {
+		/* limit upper value to 99:59:59 (HH:MM:SS) */
+		using namespace Temporal;
+		const samplecnt_t limit = (99*60*60) + (59*60) + (59); /* seconds */
+
+		if (UIConfiguration::instance().get_clock_display_limit() > limit) {
+			UIConfiguration::instance().set_clock_display_limit (limit);
+		}
 	}
 }
 
@@ -526,11 +539,11 @@ ARDOUR_UI::reset_main_clocks ()
 	ENSURE_GUI_THREAD (*this, &ARDOUR_UI::reset_main_clocks)
 
 	if (_session) {
-		primary_clock->set (_session->audible_sample(), true);
-		secondary_clock->set (_session->audible_sample(), true);
+		primary_clock->set (timepos_t (_session->audible_sample()), true);
+		secondary_clock->set (timepos_t (_session->audible_sample()), true);
 	} else {
-		primary_clock->set (0, true);
-		secondary_clock->set (0, true);
+		primary_clock->set (timepos_t(), true);
+		secondary_clock->set (timepos_t(), true);
 	}
 }
 

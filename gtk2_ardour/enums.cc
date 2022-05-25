@@ -24,12 +24,11 @@
 
 #include "pbd/enumwriter.h"
 
-#include "widgets/ardour_icon.h"
-
+#include "add_route_dialog.h"
 #include "audio_clock.h"
 #include "editing.h"
-#include "enums.h"
 #include "editor_items.h"
+#include "enums.h"
 #include "startup_fsm.h"
 
 using namespace std;
@@ -60,11 +59,12 @@ setup_gtk_ardour_enums ()
 	StartupFSM::MainState startup_state;
 	StartupFSM::DialogID startup_dialog;
 	Gtk::ResponseType dialog_response;
+	AddRouteDialog::TypeWanted type_wanted;
 
 #define REGISTER(e) enum_writer.register_distinct (typeid(e).name(), i, s); i.clear(); s.clear()
 #define REGISTER_BITS(e) enum_writer.register_bits (typeid(e).name(), i, s); i.clear(); s.clear()
-#define REGISTER_ENUM(e) i.push_back (e); s.push_back (#e)
-#define REGISTER_CLASS_ENUM(t,e) i.push_back (t::e); s.push_back (#e)
+#define REGISTER_ENUM(e) i.emplace_back (e); s.emplace_back (#e)
+#define REGISTER_CLASS_ENUM(t,e) i.emplace_back (t::e); s.emplace_back (#e)
 
 	REGISTER_CLASS_ENUM (AudioClock, Timecode);
 	REGISTER_CLASS_ENUM (AudioClock, BBT);
@@ -80,6 +80,7 @@ setup_gtk_ardour_enums ()
 	REGISTER_ENUM (ImportAsTrack);
 	REGISTER_ENUM (ImportToTrack);
 	REGISTER_ENUM (ImportAsRegion);
+	REGISTER_ENUM (ImportAsTrigger);
 	REGISTER (import_mode);
 
 	REGISTER_ENUM (EditAtPlayhead);
@@ -148,6 +149,7 @@ setup_gtk_ardour_enums ()
 	REGISTER_ENUM (MarkerBarItem);
 	REGISTER_ENUM (RangeMarkerBarItem);
 	REGISTER_ENUM (CdMarkerBarItem);
+	REGISTER_ENUM (CueMarkerBarItem);
 	REGISTER_ENUM (VideoBarItem);
 	REGISTER_ENUM (TransportMarkerBarItem);
 	REGISTER_ENUM (SelectionItem);
@@ -216,4 +218,12 @@ setup_gtk_ardour_enums ()
 	REGISTER_ENUM (RESPONSE_APPLY);
 	REGISTER_ENUM (RESPONSE_HELP);
 	REGISTER (dialog_response);
+
+	REGISTER_CLASS_ENUM (AddRouteDialog, AudioTrack);
+	REGISTER_CLASS_ENUM (AddRouteDialog, MidiTrack);
+	REGISTER_CLASS_ENUM (AddRouteDialog, AudioBus);
+	REGISTER_CLASS_ENUM (AddRouteDialog, MidiBus);
+	REGISTER_CLASS_ENUM (AddRouteDialog, VCAMaster);
+	REGISTER_CLASS_ENUM (AddRouteDialog, FoldbackBus);
+	REGISTER (type_wanted);
 }

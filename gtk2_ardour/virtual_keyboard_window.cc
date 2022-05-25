@@ -49,7 +49,7 @@ VirtualKeyboardWindow::VirtualKeyboardWindow ()
 {
 	UIConfiguration::instance().ParameterChanged.connect (sigc::mem_fun (*this, &VirtualKeyboardWindow::parameter_changed));
 
-	_piano.set_flags (Gtk::CAN_FOCUS);
+	_piano.set_can_focus ();
 
 	select_keyboard_layout (UIConfiguration::instance().get_vkeybd_layout ());
 	_piano.set_annotate_octave (true);
@@ -260,7 +260,7 @@ VirtualKeyboardWindow::parameter_changed (std::string const& p)
 }
 
 XMLNode&
-VirtualKeyboardWindow::get_state ()
+VirtualKeyboardWindow::get_state () const
 {
 	XMLNode* node = new XMLNode (X_("VirtualKeyboard"));
 	node->set_property (X_("Channel"), _midi_channel.get_text ());
@@ -561,7 +561,7 @@ VirtualKeyboardWindow::note_off_event_handler (int note)
 	ev[0] = MIDI_CMD_NOTE_OFF | channel;
 	ev[1] = note;
 	ev[2] = 0;
-	_session->vkbd_output_port ()->write (ev, 3, 0);
+	_session->vkbd_output_port ()->write (ev, 3, 1);
 }
 
 void

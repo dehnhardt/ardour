@@ -46,7 +46,7 @@ while [ $# -gt 0 ] ; do
 			PROGRAM_NAME=Mixbus
 			PROGRAM_KEY=Mixbus
 			PRODUCT_NAME=Mixbus
-			MANUAL_NAME="mixbus${major_version}-live-manual"
+			MANUAL_NAME="mixbus-live-manual"
 			shift ;;
 		--mixbus32c)
 			MIXBUS=1
@@ -57,7 +57,7 @@ while [ $# -gt 0 ] ; do
 			PROGRAM_KEY=Mixbus32C
 			PROGRAM_NAME=Mixbus32C-${PROGRAM_VERSION}
 			PROGRAM_VERSION=""
-			MANUAL_NAME="mixbus32c-${major_version}-live-manual"
+			MANUAL_NAME="mixbus32c-live-manual"
 			shift ;;
 		--chanstrip) HARRISONCHANNELSTRIP=$2 ; shift; shift ;;
 	esac
@@ -308,7 +308,7 @@ if test x$WITH_GRATIS_X42_LV2 != x ; then
 
 	echo "Adding gratis x42 Plugins"
 
-	for proj in x42-midifilter x42-stereoroute setBfree x42-avldrums x42-limiter x42-tuner; do
+	for proj in x42-autotune x42-midifilter x42-stereoroute setBfree x42-avldrums x42-limiter x42-tuner; do
 		X42_VERSION=$(curl -s -S http://x42-plugins.com/x42/win/${proj}.latest.txt)
 		rsync -a -q --partial \
 			rsync://x42-plugins.com/x42/win/${proj}-lv2-${WARCH}-${X42_VERSION}.zip \
@@ -350,15 +350,27 @@ if test -n "$MIXBUS"; then
 
 	cp "${SRCCACHE}/harrison_vamp.${WARCH}.dll" \
 		"$ALIBDIR/vamp/harrison_vamp.dll"
+
+	# Mixbus Bundled Media Content
+	curl -s -S --fail -#  \
+		-z "${SRCCACHE}/MixbusBundledMedia.zip" \
+		-o "${SRCCACHE}/MixbusBundledMedia.zip" \
+		"http://rsrc.harrisonconsoles.com/mixbus/mb8/content/MixbusBundledMedia.zip"
+
+	if test -f "${SRCCACHE}/MixbusBundledMedia.zip"; then
+		echo "Adding Mixbus Bundled Content"
+		rm -f $DESTDIR/share/${LOWERCASE_DIRNAME}/media/*.*
+		unzip -q -d "$DESTDIR/share/${LOWERCASE_DIRNAME}/media/" "${SRCCACHE}/MixbusBundledMedia.zip"
+	fi
 fi
 
 ################################################################################
 
 if test x$DEMO_SESSION_URL != x ; then
-	mkdir -p $Shared/sessions
+	mkdir -p $DESTDIR/share/${LOWERCASE_DIRNAME}/sessions
 	DEMO_SESSIONS=$(curl -s -S --fail $DEMO_SESSION_URL/index.txt)
 	for demo in $DEMO_SESSIONS; do
-		curl -s -S --fail -# -o $Shared/sessions/$demo $DEMO_SESSION_URL/$demo
+		curl -s -S --fail -# -o $DESTDIR/share/${LOWERCASE_DIRNAME}/sessions/$demo $DEMO_SESSION_URL/$demo
 	done
 fi
 
@@ -410,10 +422,10 @@ if test -n "$MIXBUS"; then
 
 # TODO: proper welcome/finish text.
 	cat >> $NSISFILE << EOF
-!define MUI_FINISHPAGE_TITLE "Welcome to Harrison Mixbus"
-!define MUI_FINISHPAGE_TEXT "Thanks for your purchase of Mixbus!\$\\r\$\\nYou will find the Mixbus application in the Start Menu (or the All Apps panel for Windows 8) \$\\r\$\\nClick the link below to view the Mixbus manual, and learn ways to get involved with the Mixbus community."
-!define MUI_FINISHPAGE_LINK "Mixbus Manual"
-!define MUI_FINISHPAGE_LINK_LOCATION "http://www.harrisonconsoles.com/mixbus/${MANUAL_NAME}/"
+!define MUI_FINISHPAGE_TITLE "Welcome to Harrison ${PROGRAM_NAME}"
+!define MUI_FINISHPAGE_TEXT "Thanks for your purchase of ${PROGRAM_NAME}!\$\\r\$\\nYou will find the ${PROGRAM_NAME} application in the Start Menu (or the All Apps panel for Windows 8) \$\\r\$\\nClick the link below to view the ${PROGRAM_NAME} manual, and learn ways to get involved with the Mixbus community."
+!define MUI_FINISHPAGE_LINK "${PROGRAM_NAME} Manual"
+!define MUI_FINISHPAGE_LINK_LOCATION "https://rsrc.harrisonconsoles.com/mixbus/${MANUAL_NAME}/"
 !define MUI_FINISHPAGE_NOREBOOTSUPPORT
 EOF
 

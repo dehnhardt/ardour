@@ -44,6 +44,8 @@
 
 #include "pbd/i18n.h"
 
+using namespace Temporal;
+
 AutomationRegionView::AutomationRegionView (ArdourCanvas::Container*                  parent,
                                             AutomationTimeAxisView&                   time_axis,
                                             boost::shared_ptr<ARDOUR::Region>         region,
@@ -52,8 +54,6 @@ AutomationRegionView::AutomationRegionView (ArdourCanvas::Container*            
                                             double                                    spu,
                                             uint32_t                                  basic_color)
 	: RegionView(parent, time_axis, region, spu, basic_color, true)
-	, _region_relative_time_converter(region->session().tempo_map(), region->position())
-	, _source_relative_time_converter(region->session().tempo_map(), region->position() - region->start())
 	, _parameter(param)
 {
 	TimeAxisViewItem::set_position (_region->position(), this);
@@ -79,18 +79,16 @@ AutomationRegionView::~AutomationRegionView ()
 void
 AutomationRegionView::init (bool /*wfd*/)
 {
-	_enable_display = false;
+	DisplaySuspender (*this);
 
 	RegionView::init (false);
 
-	reset_width_dependent_items ((double) _region->length() / samples_per_pixel);
+	reset_width_dependent_items ((double) _region->length_samples() / samples_per_pixel);
 
 	set_height (trackview.current_height());
 
 	fill_color_name = "midi frame base";
 	set_colors ();
-
-	_enable_display = true;
 }
 
 void
@@ -100,12 +98,11 @@ AutomationRegionView::create_line (boost::shared_ptr<ARDOUR::AutomationList> lis
 				ARDOUR::EventTypeMap::instance().to_symbol(list->parameter()),
 				trackview, *get_canvas_group(), list,
 				boost::dynamic_pointer_cast<ARDOUR::MidiRegion> (_region),
-				_parameter,
-				&_source_relative_time_converter));
+				_parameter));
 	_line->set_colors();
 	_line->set_height ((uint32_t)rint(trackview.current_height() - 2.5 - NAME_HIGHLIGHT_SIZE));
 	_line->set_visibility (AutomationLine::VisibleAspects (AutomationLine::Line|AutomationLine::ControlPoints));
-	_line->set_maximum_time (_region->length());
+	_line->set_maximum_time (timepos_t (_region->length()));
 	_line->set_offset (_region->start ());
 }
 
@@ -157,7 +154,15 @@ AutomationRegionView::canvas_group_event (GdkEvent* ev)
 
 		/* guard points only if primary modifier is used */
 		bool with_guard_points = Gtkmm2ext::Keyboard::modifier_state_equals (ev->button.state, Gtkmm2ext::Keyboard::PrimaryModifier);
-		add_automation_event (ev, e.pixel_to_sample (x) - _region->position() + _region->start(), y, with_guard_points);
+
+		/* the time domain doesn't matter here, because the automation
+		 * list will force the position to its own time domain when
+		 * adding the point.
+		 */
+
+		const timepos_t pos = timepos_t (e.pixel_to_sample (x) - _region->position_sample() + _region->start_sample());
+
+		add_automation_event (ev, pos, y, with_guard_points);
 		return true;
 	}
 
@@ -168,10 +173,11 @@ AutomationRegionView::canvas_group_event (GdkEvent* ev)
  *  @param y y position, relative to our TimeAxisView.
  */
 void
-AutomationRegionView::add_automation_event (GdkEvent *, samplepos_t when, double y, bool with_guard_points)
+AutomationRegionView::add_automation_event (GdkEvent *, timepos_t const & w, double y, bool with_guard_points)
 {
 	boost::shared_ptr<Evoral::Control> c = _region->control(_parameter, true);
 	boost::shared_ptr<ARDOUR::AutomationControl> ac = boost::dynamic_pointer_cast<ARDOUR::AutomationControl>(c);
+	timepos_t when (w); /* the non-const copy */
 
 	if (!_line) {
 		assert(ac);
@@ -184,28 +190,28 @@ AutomationRegionView::add_automation_event (GdkEvent *, samplepos_t when, double
 	/* compute vertical fractional position */
 	y = 1.0 - (y / _line->height());
 
-	/* snap sample, prepare conversion to double beats */
-	double when_d = snap_sample_to_sample (when - _region->start ()).sample + _region->start ();
+	/* snap time */
 
-	/* convert 'when' to music-time relative to the region and scale y from interface to internal */
-	_line->view_to_model_coord (when_d, y);
+	when = snap_region_time_to_region_time (when.earlier (_region->start()), false) + _region->start ();
 
-	if (UIConfiguration::instance().get_new_automation_points_on_lane()) {
-		if (c->list()->size () == 0) {
-			/* we need the MidiTrack::MidiControl, not the region's (midi model source) control */
-			boost::shared_ptr<ARDOUR::MidiTrack> mt = boost::dynamic_pointer_cast<ARDOUR::MidiTrack> (view->parent_stripable ());
-			assert (mt);
-			boost::shared_ptr<Evoral::Control> mc = mt->control(_parameter);
-			assert (mc);
-			y = mc->user_double ();
-		} else {
-			y = c->list()->eval (when_d);
-		}
+	/* map using line */
+
+	_line->view_to_model_coord_y (y);
+
+	if (c->list()->size () == 0) {
+		/* we need the MidiTrack::MidiControl, not the region's (midi model source) control */
+		boost::shared_ptr<ARDOUR::MidiTrack> mt = boost::dynamic_pointer_cast<ARDOUR::MidiTrack> (view->parent_stripable ());
+		assert (mt);
+		boost::shared_ptr<Evoral::Control> mc = mt->control(_parameter);
+		assert (mc);
+		y = mc->user_double ();
+	} else if (UIConfiguration::instance().get_new_automation_points_on_lane()) {
+		y = c->list()->eval (when);
 	}
 
 	XMLNode& before = _line->the_list()->get_state();
 
-	if (_line->the_list()->editor_add (when_d, y, with_guard_points)) {
+	if (_line->the_list()->editor_add (when, y, with_guard_points)) {
 
 		if (ac->automation_state () == ARDOUR::Off) {
 			ac->set_automation_state (ARDOUR::Play);
@@ -226,7 +232,7 @@ AutomationRegionView::add_automation_event (GdkEvent *, samplepos_t when, double
 }
 
 bool
-AutomationRegionView::paste (samplepos_t                                     pos,
+AutomationRegionView::paste (timepos_t const &                               pos,
                              unsigned                                        paste_count,
                              float                                           times,
                              boost::shared_ptr<const ARDOUR::AutomationList> slist)
@@ -241,24 +247,17 @@ AutomationRegionView::paste (samplepos_t                                     pos
 		return false;
 	}
 
-	AutomationType src_type = (AutomationType)slist->parameter().type ();
-	double len = slist->length();
+	timecnt_t len = slist->length();
+	timepos_t p (pos);
 
 	/* add multi-paste offset if applicable */
-	if (parameter_is_midi (src_type)) {
-		// convert length to samples (incl tempo-ramps)
-		len = DoubleBeatsSamplesConverter (view->session()->tempo_map(), pos).to (len * paste_count);
-		pos += view->editor ().get_paste_offset (pos, paste_count > 0 ? 1 : 0, len);
-	} else {
-		pos += view->editor ().get_paste_offset (pos, paste_count, len);
-	}
+	p += view->editor ().get_paste_offset (pos, paste_count > 0 ? 1 : 0, len);
 
 	/* convert sample-position to model's unit and position */
-	const double model_pos = _source_relative_time_converter.from (
-		pos - _source_relative_time_converter.origin_b());
+	timepos_t model_pos = timepos_t (source_relative_distance (timecnt_t (p, timepos_t()), slist->time_domain()));
 
 	XMLNode& before = my_list->get_state();
-	my_list->paste(*slist, model_pos, DoubleBeatsSamplesConverter (view->session()->tempo_map(), pos));
+	my_list->paste (*slist, model_pos);
 	view->session()->add_command(
 		new MementoCommand<ARDOUR::AutomationList>(_line->memento_command_binder(), &before, &my_list->get_state()));
 
@@ -276,10 +275,10 @@ AutomationRegionView::set_height (double h)
 }
 
 bool
-AutomationRegionView::set_position (samplepos_t pos, void* src, double* ignored)
+AutomationRegionView::set_position (timepos_t const & pos, void* src, double* ignored)
 {
 	if (_line) {
-		_line->set_maximum_time (_region->length ());
+		_line->set_maximum_time (timepos_t (_region->length ()));
 	}
 
 	return RegionView::set_position(pos, src, ignored);
@@ -302,15 +301,6 @@ AutomationRegionView::region_resized (const PBD::PropertyChange& what_changed)
 {
 	RegionView::region_resized (what_changed);
 
-	if (what_changed.contains (ARDOUR::Properties::position)) {
-		_region_relative_time_converter.set_origin_b(_region->position());
-	}
-
-	if (what_changed.contains (ARDOUR::Properties::start) ||
-	    what_changed.contains (ARDOUR::Properties::position)) {
-		_source_relative_time_converter.set_origin_b (_region->position() - _region->start());
-	}
-
 	if (!_line) {
 		return;
 	}
@@ -320,7 +310,7 @@ AutomationRegionView::region_resized (const PBD::PropertyChange& what_changed)
 	}
 
 	if (what_changed.contains (ARDOUR::Properties::length)) {
-		_line->set_maximum_time (_region->length());
+		_line->set_maximum_time (timepos_t (_region->length()));
 	}
 }
 

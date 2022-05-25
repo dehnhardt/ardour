@@ -35,7 +35,7 @@ class Muteable;
 class LIBARDOUR_API SoloControl : public SlavableAutomationControl
 {
   public:
-	SoloControl (Session& session, std::string const & name, Soloable& soloable, Muteable& m);
+	SoloControl (Session& session, std::string const & name, Soloable& soloable, Muteable& m, Temporal::TimeDomain);
 
 	double get_value () const;
 	double get_save_value() const { return self_soloed(); }
@@ -94,7 +94,7 @@ class LIBARDOUR_API SoloControl : public SlavableAutomationControl
 	void clear_all_solo_state ();
 
 	int set_state (XMLNode const&, int);
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 
   protected:
 	void actually_set_value (double, PBD::Controllable::GroupControlDisposition group_override);

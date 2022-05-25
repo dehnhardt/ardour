@@ -119,15 +119,17 @@ static void* vstfx_load_vst_library(const char* path)
 
 	/*Path not specified - not much more we can do*/
 
-	if (envdup == 0)
+	if (envdup == 0) {
 		return 0;
+	}
 
 	/*Copy the path into envdup*/
 
 	envdup = strdup (envdup);
 
-	if (envdup == 0)
+	if (envdup == 0) {
 		return 0;
+	}
 
 	len2 = strlen(path);
 

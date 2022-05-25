@@ -124,6 +124,7 @@ public:
 
 	void set_private_port_latencies (samplecnt_t value, bool playback);
 	void set_public_port_latencies (samplecnt_t value, bool playback) const;
+	void set_public_port_latency_from_connections () const;
 
 	PortSet& ports() { return _ports; }
 	const PortSet& ports() const { return _ports; }
@@ -151,7 +152,7 @@ public:
 	 */
 	PBD::Signal2<void, IOChange, void *> changed;
 
-	XMLNode& get_state (void);
+	XMLNode& get_state () const;
 
 	int set_state (const XMLNode&, int version);
 	int set_state_2X (const XMLNode&, int, bool);
@@ -182,23 +183,10 @@ public:
 	 */
 	PBD::Signal1<bool, ChanCount, BoolCombiner> PortCountChanging;
 
-	static int disable_connecting ();
-	static int enable_connecting ();
-
 	static PBD::Signal1<void, ChanCount> PortCountChanged; // emitted when the number of ports changes
 
 	static std::string name_from_state (const XMLNode&);
 	static void set_name_in_state (XMLNode&, const std::string&);
-
-	/* we have to defer/order port connection. this is how we do it.
-	*/
-
-	static PBD::Signal0<int> ConnectingLegal;
-	static bool              connecting_legal;
-
-	XMLNode *pending_state_node;
-	int pending_state_node_version;
-	bool pending_state_node_in;
 
 	/* three utility functions - this just seems to be simplest place to put them */
 
@@ -210,7 +198,7 @@ public:
 	int set_ports (const std::string& str);
 
 protected:
-	virtual XMLNode& state ();
+	virtual XMLNode& state () const;
 
 	Direction _direction;
 	DataType _default_type;
@@ -220,9 +208,6 @@ protected:
 private:
 	mutable Glib::Threads::Mutex io_lock;
 	PortSet   _ports;
-
-	int connecting_became_legal ();
-	PBD::ScopedConnection connection_legal_c;
 
 	void reestablish_port_subscriptions ();
 	PBD::ScopedConnectionList _port_connections;
@@ -241,12 +226,11 @@ private:
 	int ensure_ports (ChanCount, bool clear, void *src);
 
 	void bundle_changed (Bundle::Change);
+	int set_port_state_2X (const XMLNode& node, int version, bool in);
 
 	int get_port_counts (const XMLNode& node, int version, ChanCount& n, boost::shared_ptr<Bundle>& c);
 	int get_port_counts_2X (const XMLNode& node, int version, ChanCount& n, boost::shared_ptr<Bundle>& c);
 	int create_ports (const XMLNode&, int version);
-	int make_connections (const XMLNode&, int, bool);
-	int make_connections_2X (const XMLNode &, int, bool);
 
 	boost::shared_ptr<Bundle> find_possible_bundle (const std::string &desired_name);
 

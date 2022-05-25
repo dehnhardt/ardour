@@ -147,21 +147,18 @@ PortInsert::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_samp
 		return;
 	}
 
-	if (!_active && !_pending_active) {
+	if (!check_active()) {
 		/* deliver silence */
 		silence (nframes, start_sample);
-		goto out;
+		return;
 	}
 
 	_out->run (bufs, start_sample, end_sample, speed, nframes, true);
 	_input->collect_input (bufs, nframes, ChanCount::ZERO);
-
-out:
-	_active = _pending_active;
 }
 
 XMLNode&
-PortInsert::state ()
+PortInsert::state () const
 {
 	XMLNode& node = IOProcessor::state ();
 	node.set_property ("type", "port");

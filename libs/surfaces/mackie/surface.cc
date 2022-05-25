@@ -93,9 +93,9 @@ static MidiByteArray mackie_sysex_hdr_xt  (5, MIDI::sysex, 0x0, 0x0, 0x66, 0x15)
 
 //QCON
 // The MCU sysex header for QCon Control surface
-static MidiByteArray mackie_sysex_hdr_qcon  (5, MIDI::sysex, 0x0, 0x0, 0x66, 0x14); 
+static MidiByteArray mackie_sysex_hdr_qcon  (5, MIDI::sysex, 0x0, 0x0, 0x66, 0x14);
 
-// The MCU sysex header for QCon Control - extender 
+// The MCU sysex header for QCon Control - extender
 // The extender differs from Mackie by 4th bit - it's same like for main control surface (for display)
 static MidiByteArray mackie_sysex_hdr_xt_qcon  (5, MIDI::sysex, 0x0, 0x0, 0x66, 0x14);
 
@@ -127,19 +127,19 @@ Surface::Surface (MackieControlProtocol& mcp, const std::string& device_name, ui
 	}
 
 	//Store Qcon flag
-	if( mcp.device_info().is_qcon() ) {
-		is_qcon = true;
-		_has_master_display = (mcp.device_info().has_master_fader() && mcp.device_info().has_qcon_second_lcd());
-		_has_master_meter = mcp.device_info().has_qcon_master_meters();
-	} else {
-		is_qcon = false;
-	}
+	is_qcon = mcp.device_info().is_qcon();
 
 	/* only the first Surface object has global controls */
 	/* lets use master_position instead */
 	uint32_t mp = _mcp.device_info().master_position();
 	if (_number == mp) {
 		DEBUG_TRACE (DEBUG::MackieControl, "Surface matches MasterPosition. Might have global controls.\n");
+
+		if ( is_qcon ) {
+			_has_master_display = (mcp.device_info().has_master_fader() && mcp.device_info().has_qcon_second_lcd());
+			_has_master_meter = mcp.device_info().has_qcon_master_meters();
+		}
+
 		if (_mcp.device_info().has_global_controls()) {
 			init_controls ();
 			DEBUG_TRACE (DEBUG::MackieControl, "init_controls done\n");
@@ -273,7 +273,7 @@ Surface::connection_handler (boost::weak_ptr<ARDOUR::Port>, std::string name1, b
 }
 
 XMLNode&
-Surface::get_state()
+Surface::get_state() const
 {
 	XMLNode* node = new XMLNode (X_("Surface"));
 	node->set_property (X_("name"), _name);
@@ -315,14 +315,14 @@ const MidiByteArray&
 Surface::sysex_hdr() const
 {
 	switch  (_stype) {
-	case mcu: 
+	case mcu:
 		if (_mcp.device_info().is_qcon()) {
 			return mackie_sysex_hdr_qcon;
 		} else {
 			return mackie_sysex_hdr;
 		}
 	case ext:
-		if(_mcp.device_info().is_qcon()) {		
+		if(_mcp.device_info().is_qcon()) {
 			return mackie_sysex_hdr_xt_qcon;
 		} else {
 			return mackie_sysex_hdr_xt;
@@ -408,6 +408,33 @@ Surface::master_monitor_may_have_changed ()
 	if (_number == _mcp.device_info().master_position()) {
 		setup_master ();
 	}
+}
+
+bool
+Surface::master_stripable_is_master_monitor ()
+{
+	if (_master_stripable == _mcp.get_session().monitor_out())
+	{
+		return true;
+	}
+	return false;
+}
+
+void
+Surface::toggle_master_monitor ()
+{
+	if(master_stripable_is_master_monitor())
+	{
+		_master_stripable = _mcp.get_session().master_out();
+	} else if (_mcp.get_session().monitor_out() != 0)
+	{
+		_master_stripable = _mcp.get_session().monitor_out();
+	} else { return; }
+	
+	_master_fader->set_control (_master_stripable->gain_control());
+	_master_stripable->gain_control()->Changed.connect (master_connection, MISSING_INVALIDATOR, boost::bind (&Surface::master_gain_changed, this), ui_context());
+	_last_master_gain_written = FLT_MAX;
+	master_gain_changed ();
 }
 
 void
@@ -853,9 +880,9 @@ Surface::handle_midi_sysex (MIDI::Parser &, MIDI::byte * raw_bytes, size_t count
 		if (_mcp.device_info().is_qcon()) {
 			mackie_sysex_hdr_qcon[4] = bytes[4];
 		} else {
-			mackie_sysex_hdr[4] = bytes[4]; 
+			mackie_sysex_hdr[4] = bytes[4];
 		}
-		
+
 	} else {
 		if (_mcp.device_info().is_qcon()) {
 			mackie_sysex_hdr_xt_qcon[4] = bytes[4];

@@ -58,10 +58,11 @@
 #include "ardour/profile.h"
 #include "ardour/scene_changer.h"
 #include "ardour/session.h"
+#include "ardour/tempo.h"
 #include "ardour/transport_fsm.h"
 #include "ardour/transport_master.h"
 #include "ardour/transport_master_manager.h"
-#include "ardour/tempo.h"
+#include "ardour/triggerbox.h"
 #include "ardour/operations.h"
 #include "ardour/vca.h"
 #include "ardour/vca_manager.h"
@@ -69,7 +70,7 @@
 using namespace std;
 using namespace ARDOUR;
 using namespace PBD;
-
+using namespace Temporal;
 
 #ifdef NDEBUG
 # define ENSURE_PROCESS_THREAD do {} while (0)
@@ -84,6 +85,7 @@ using namespace PBD;
 
 
 #define TFSM_EVENT(evtype) { _transport_fsm->enqueue (new TransportFSM::Event (evtype)); }
+#define TFSM_ROLL() { _transport_fsm->enqueue (new TransportFSM::Event (TransportFSM::StartTransport)); }
 #define TFSM_STOP(abort,clear) { _transport_fsm->enqueue (new TransportFSM::Event (TransportFSM::StopTransport,abort,clear)); }
 #define TFSM_LOCATE(target,ltd,loop,force) { _transport_fsm->enqueue (new TransportFSM::Event (TransportFSM::Locate,target,ltd,loop,force)); }
 #define TFSM_SPEED(speed) { _transport_fsm->enqueue (new TransportFSM::Event (speed)); }
@@ -242,7 +244,7 @@ Session::locate (samplepos_t target_sample, bool for_loop_end, bool force, bool 
 		Location* al = _locations->auto_loop_location();
 
 		if (al) {
-			if (_transport_sample < al->start() || _transport_sample >= al->end()) {
+			if (_transport_sample < al->start_sample() || _transport_sample >= al->end_sample()) {
 
 				// located outside the loop: cancel looping directly, this is called from event handling context
 
@@ -258,7 +260,7 @@ Session::locate (samplepos_t target_sample, bool for_loop_end, bool force, bool 
 					set_track_loop (false);
 				}
 
-			} else if (_transport_sample == al->start()) {
+			} else if (_transport_sample == al->start_sample()) {
 
 				// located to start of loop - this is looping, basically
 
@@ -415,7 +417,6 @@ Session::set_transport_speed (double speed)
 	 * The 0.2% dead-zone is somewhat arbitrary. Main use-case
 	 * for TransportStateChange() here is the ShuttleControl display.
 	 */
-
 	const double act_speed = actual_speed ();
 
 	if (fabs (_signalled_varispeed - act_speed) > .002
@@ -430,6 +431,23 @@ Session::set_transport_speed (double speed)
 	}
 
 }
+
+/** Called from the gui thread */
+void
+Session::stop_all_triggers (bool now)
+{
+	boost::shared_ptr<RouteList> rl = routes.reader();
+
+	for (RouteList::iterator i = rl->begin(); i != rl->end(); ++i) {
+		(*i)->stop_triggers (now);
+	}
+
+	if (TriggerBox::cue_recording()) {
+		CueRecord cr (INT32_MAX, _transport_sample);
+		TriggerBox::cue_records.write (&cr, 1);
+	}
+}
+
 
 /** Stop the transport.  */
 void
@@ -446,6 +464,14 @@ Session::stop_transport (bool abort, bool clear_state)
 
 /** Called from the process thread */
 void
+Session::start_transport_from_trigger ()
+{
+	ENSURE_PROCESS_THREAD;
+	TFSM_ROLL();
+}
+
+/** Called from the process thread */
+void
 Session::start_transport (bool after_loop)
 {
 	ENSURE_PROCESS_THREAD;
@@ -456,14 +482,14 @@ Session::start_transport (bool after_loop)
 		Location *location = _locations->auto_loop_location();
 
 		if (location != 0) {
-			if (_transport_sample != location->start()) {
+			if (_transport_sample != location->start_sample()) {
 
 				/* force tracks to do their thing */
 				set_track_loop (true);
 
 				/* jump to start and then roll from there */
 
-				request_locate (location->start(), MustRoll);
+				request_locate (location->start_sample(), MustRoll);
 				return;
 			}
 		}
@@ -523,20 +549,21 @@ Session::start_transport (bool after_loop)
 
 		if ((actively_recording () || (config.get_punch_in () && get_record_enabled ()))
 		    && click_data && (config.get_count_in () || _count_in_once)) {
+			TempoMap::SharedPtr tmap (TempoMap::use());
+
 			_count_in_once = false;
 			/* calculate count-in duration (in audio samples)
 			 * - use [fixed] tempo/meter at _transport_sample
 			 * - calc duration of 1 bar + time-to-beat before or at transport_sample
 			 */
-			const Tempo& tempo = _tempo_map->tempo_at_sample (_transport_sample);
-			const Meter& meter = _tempo_map->meter_at_sample (_transport_sample);
+			TempoMetric const & tempometric = tmap->metric_at (_transport_sample);
 
-			const double num = meter.divisions_per_bar ();
-			const double den = meter.note_divisor ();
-			const double barbeat = _tempo_map->exact_qn_at_sample (_transport_sample, 0) * den / (4. * num);
-			const double bar_fract = fmod (barbeat, 1.0); // fraction of bar elapsed.
+			const double num = tempometric.divisions_per_bar ();
+			/* XXX possible optimization: get meter and BBT time in one call */
+			const Temporal::BBT_Time bbt = tmap->bbt_at (timepos_t (_transport_sample));
+			const double bar_fract = (double) bbt.beats / tempometric.divisions_per_bar();
 
-			_count_in_samples = meter.samples_per_bar (tempo, _current_sample_rate);
+			_count_in_samples = tempometric.samples_per_bar (_current_sample_rate);
 
 			double dt = _count_in_samples / num;
 			if (bar_fract == 0) {
@@ -575,7 +602,7 @@ Session::start_transport (bool after_loop)
 		SessionEvent* ev = new SessionEvent (SessionEvent::TransportStateChange, SessionEvent::Add, _transport_sample, _transport_sample, 1.0);
 		queue_event (ev);
 
-		samplepos_t roll_pos = _transport_sample + std::max (_count_in_samples, _remaining_latency_preroll) * (_transport_fsm->will_roll_fowards () ? 1 : -1);
+		samplepos_t roll_pos = _transport_sample + std::max (_count_in_samples, _remaining_latency_preroll) * (_transport_fsm->will_roll_forwards () ? 1 : -1);
 		if (roll_pos > 0 && roll_pos != _transport_sample) {
 			/* and when transport_rolling () == true */
 			SessionEvent* ev = new SessionEvent (SessionEvent::TransportStateChange, SessionEvent::Add, roll_pos, roll_pos, 1.0);
@@ -1012,7 +1039,7 @@ Session::request_play_loop (bool yn, bool change_transport_roll)
 }
 
 void
-Session::request_play_range (list<AudioRange>* range, bool leave_rolling)
+Session::request_play_range (list<TimelineRange>* range, bool leave_rolling)
 {
 	SessionEvent* ev = new SessionEvent (SessionEvent::SetPlayAudioRange, SessionEvent::Add, SessionEvent::Immediate, 0, (leave_rolling ? _transport_fsm->default_speed() : 0.0));
 	if (range) {
@@ -1099,10 +1126,10 @@ Session::butler_transport_work (bool have_process_lock)
 	bool finished = true;
 	PostTransportWork ptw = post_transport_work();
 #ifndef NDEBUG
-	uint64_t before;
+	uint64_t before = g_get_monotonic_time();
 #endif
 
-	DEBUG_TRACE (DEBUG::Transport, string_compose ("Butler transport work, todo = [%1] (0x%3%4%5) at %2\n", enum_2_string (ptw), (before = g_get_monotonic_time()), std::hex, ptw, std::dec));
+	DEBUG_TRACE (DEBUG::Transport, string_compose ("Butler transport work, todo = [%1] (0x%3%4%5) at %2\n", enum_2_string (ptw), before, std::hex, ptw, std::dec));
 
 	if (ptw & PostTransportAdjustPlaybackBuffering) {
 		/* need to prevent concurrency with ARDOUR::Reader::run(),
@@ -1140,18 +1167,21 @@ Session::butler_transport_work (bool have_process_lock)
 		}
 	}
 
+	const int butler = g_atomic_int_get (&_butler_seek_counter);
+	const int rtlocates = g_atomic_int_get (&_seek_counter);
+	const bool will_locate = (butler != rtlocates);
+
 	if (ptw & PostTransportStop) {
-		non_realtime_stop (ptw & PostTransportAbort, on_entry, finished);
+		non_realtime_stop (ptw & PostTransportAbort, on_entry, finished, will_locate);
+
 		if (!finished) {
 			g_atomic_int_dec_and_test (&_butler->should_do_transport_work);
 			goto restart;
 		}
 	}
 
-	const int butler = g_atomic_int_get (&_butler_seek_counter);
-	const int rtlocates = g_atomic_int_get (&_seek_counter);
 
-	if (butler != rtlocates) {
+	if (will_locate) {
 		DEBUG_TRACE (DEBUG::Transport, string_compose ("nonrealtime locate invoked from BTW (butler has done %1, rtlocs %2)\n", butler, rtlocates));
 		non_realtime_locate ();
 	}
@@ -1202,13 +1232,13 @@ Session::non_realtime_locate ()
 
 		Location *loc  = _locations->auto_loop_location();
 
-		if (!loc || (_transport_sample < loc->start() || _transport_sample >= loc->end())) {
+		if (!loc || (_transport_sample < loc->start().samples() || _transport_sample >= loc->end().samples())) {
 			/* jumped out of loop range: stop tracks from looping,
 			   but leave loop (mode) enabled.
 			 */
 			set_track_loop (false);
 
-		} else if (loc && ((loc->start() <= _transport_sample) || (loc->end() > _transport_sample))) {
+		} else if (loc && ((loc->start().samples() <= _transport_sample) || (loc->end().samples() > _transport_sample))) {
 
 			/* jumping to start of loop. This  might have been done before but it is
 			 * idempotent and cheap. Doing it here ensures that when we start playback
@@ -1305,7 +1335,7 @@ Session::follow_playhead_priority ()
 }
 
 void
-Session::non_realtime_stop (bool abort, int on_entry, bool& finished)
+Session::non_realtime_stop (bool abort, int on_entry, bool& finished, bool will_locate)
 {
 	struct tm* now;
 	time_t     xnow;
@@ -1333,6 +1363,11 @@ Session::non_realtime_stop (bool abort, int on_entry, bool& finished)
 	if (auditioner) {
 		auditioner->cancel_audition ();
 	}
+
+	/* This must be called while _transport_sample still reflects where we stopped
+	 */
+
+	flush_cue_recording ();
 
 	if (did_record) {
 		begin_reversible_command (Operations::capture);
@@ -1469,7 +1504,7 @@ Session::non_realtime_stop (bool abort, int on_entry, bool& finished)
 	/* reset loop_changing so it does not affect next transport action */
 	loop_changing = false;
 
-	if (!_transport_fsm->declicking_for_locate()) {
+	if (!will_locate && !_transport_fsm->declicking_for_locate()) {
 
 		DEBUG_TRACE (DEBUG::Transport, X_("Butler PTW: locate\n"));
 
@@ -1576,7 +1611,7 @@ Session::set_play_loop (bool yn, bool change_transport_state)
 		/* set all tracks to use internal looping */
 		set_track_loop (true);
 
-		merge_event (new SessionEvent (SessionEvent::AutoLoop, SessionEvent::Replace, loc->end(), loc->start(), 0.0f));
+		merge_event (new SessionEvent (SessionEvent::AutoLoop, SessionEvent::Replace, loc->end().samples(), loc->start().samples(), 0.0f));
 
 		if (!Config->get_loop_is_mode()) {
 			if (transport_rolling()) {
@@ -1584,11 +1619,11 @@ Session::set_play_loop (bool yn, bool change_transport_state)
 				loop_changing = true;
 			}
 			/* args: position, disposition, for_loop_end=false, force=true */
-			TFSM_LOCATE (loc->start(), MustRoll, false, true);
+			TFSM_LOCATE (loc->start().samples(), MustRoll, false, true);
 		} else {
 			if (!transport_rolling()) {
 				/* loop-is-mode: not rolling, just locate to loop start */
-				TFSM_LOCATE (loc->start(), MustStop, false, true);
+				TFSM_LOCATE (loc->start().samples(), MustStop, false, true);
 			}
 		}
 		TransportStateChange (); /* EMIT SIGNAL */
@@ -1661,7 +1696,7 @@ Session::unset_play_range ()
 }
 
 void
-Session::set_play_range (list<AudioRange>& range, bool leave_rolling)
+Session::set_play_range (list<TimelineRange>& range, bool leave_rolling)
 {
 	SessionEvent* ev;
 
@@ -1685,12 +1720,12 @@ Session::set_play_range (list<AudioRange>& range, bool leave_rolling)
 	/* cancel loop play */
 	unset_play_loop ();
 
-	list<AudioRange>::size_type sz = range.size();
+	list<TimelineRange>::size_type sz = range.size();
 
 	if (sz > 1) {
 
-		list<AudioRange>::iterator i = range.begin();
-		list<AudioRange>::iterator next;
+		list<TimelineRange>::iterator i = range.begin();
+		list<TimelineRange>::iterator next;
 
 		while (i != range.end()) {
 
@@ -1700,7 +1735,7 @@ Session::set_play_range (list<AudioRange>& range, bool leave_rolling)
 			/* locating/stopping is subject to delays for declicking.
 			 */
 
-			samplepos_t requested_sample = i->end;
+			samplepos_t requested_sample = i->end().samples();
 
 			if (requested_sample > current_block_size) {
 				requested_sample -= current_block_size;
@@ -1711,7 +1746,7 @@ Session::set_play_range (list<AudioRange>& range, bool leave_rolling)
 			if (next == range.end()) {
 				ev = new SessionEvent (SessionEvent::RangeStop, SessionEvent::Add, requested_sample, 0, 0.0f);
 			} else {
-				ev = new SessionEvent (SessionEvent::RangeLocate, SessionEvent::Add, requested_sample, (*next).start, 0.0f);
+				ev = new SessionEvent (SessionEvent::RangeLocate, SessionEvent::Add, requested_sample, (*next).start().samples(), 0.0f);
 			}
 
 			merge_event (ev);
@@ -1721,7 +1756,7 @@ Session::set_play_range (list<AudioRange>& range, bool leave_rolling)
 
 	} else if (sz == 1) {
 
-		ev = new SessionEvent (SessionEvent::RangeStop, SessionEvent::Add, range.front().end, 0, 0.0f);
+		ev = new SessionEvent (SessionEvent::RangeStop, SessionEvent::Add, range.front().end().samples(), 0, 0.0f);
 		merge_event (ev);
 
 	}
@@ -1732,7 +1767,7 @@ Session::set_play_range (list<AudioRange>& range, bool leave_rolling)
 
 	/* now start rolling at the right place */
 
-	ev = new SessionEvent (SessionEvent::LocateRoll, SessionEvent::Add, SessionEvent::Immediate, range.front().start, 0.0f, false);
+	ev = new SessionEvent (SessionEvent::LocateRoll, SessionEvent::Add, SessionEvent::Immediate, range.front().start().samples(), 0.0f, false);
 	merge_event (ev);
 
 	DEBUG_TRACE (DEBUG::Transport, string_compose ("send TSC5 with speed = %1\n", _transport_fsm->transport_speed()));
@@ -1742,8 +1777,8 @@ Session::set_play_range (list<AudioRange>& range, bool leave_rolling)
 void
 Session::request_bounded_roll (samplepos_t start, samplepos_t end)
 {
-	AudioRange ar (start, end, 0);
-	list<AudioRange> lar;
+	TimelineRange ar (timepos_t (start), timepos_t (end), 0);
+	list<TimelineRange> lar;
 
 	lar.push_back (ar);
 	request_play_range (&lar, true);
@@ -1772,6 +1807,7 @@ Session::engine_halted ()
 	   We can't queue SessionEvents because they only get
 	   handled from within a process callback.
 	*/
+	cancel_audition ();
 
 	/* this just stops the FSM engine ... it doesn't change the state of
 	 * the FSM directly or anything else ... but the FSM will be
@@ -1846,11 +1882,13 @@ void
 Session::route_processors_changed (RouteProcessorChange c)
 {
 	if (g_atomic_int_get (&_ignore_route_processor_changes) > 0) {
-		g_atomic_int_set (&_ignored_a_processor_change, 1);
+		g_atomic_int_or (&_ignored_a_processor_change, (int)c.type);
 		return;
 	}
 
 	if (c.type == RouteProcessorChange::MeterPointChange) {
+		/* sort rec-armed routes first */
+		resort_routes ();
 		set_dirty ();
 		return;
 	}
@@ -2013,6 +2051,12 @@ Session::transport_state_rolling() const
 }
 
 bool
+Session::transport_locating() const
+{
+	return _transport_fsm->locating();
+}
+
+bool
 Session::transport_rolling() const
 {
 	return _transport_fsm->transport_speed() != 0.0 && _count_in_samples == 0 && _remaining_latency_preroll == 0;
@@ -2039,7 +2083,7 @@ Session::declick_in_progress () const
 bool
 Session::transport_will_roll_forwards () const
 {
-	return _transport_fsm->will_roll_fowards ();
+	return _transport_fsm->will_roll_forwards ();
 }
 
 double
@@ -2057,4 +2101,35 @@ Session::actual_speed() const
 	if (_transport_fsm->transport_speed() > 0) return _engine_speed;
 	if (_transport_fsm->transport_speed() < 0) return - _engine_speed;
 	return 0;
+}
+
+void
+Session::flush_cue_recording ()
+{
+	/* if the user canceled cue recording before stopping *and* didn't record any cues, leave cues unchanged */
+	if (!TriggerBox::cue_recording() && !TriggerBox::cue_records.read_space()) {
+		return;
+	}
+
+	CueRecord cr;
+	TempoMap::SharedPtr tmap (TempoMap::use());
+
+	/* we will delete the cues we rolled over, even if the user never wrote any new cues (??)*/
+	_locations->clear_cue_markers (_last_roll_location, _transport_sample);
+
+	while (TriggerBox::cue_records.read (&cr, 1) == 1) {
+		BBT_Time bbt = tmap->bbt_at (timepos_t (cr.when));
+		bbt = bbt.round_up_to_bar ();
+
+		const timepos_t when (tmap->quarters_at (bbt));
+
+		Location* l = new Location (*this, when, when, std::string(), Location::Flags (Location::IsMark|Location::IsCueMarker), cr.cue_number);
+		_locations->add (l);
+	}
+
+	/* scheduled sync of cue markers in RT thread */
+	cue_marker_change (0);
+
+	/* disarm the cues from recording when we finish our pass */
+	TriggerBox::set_cue_recording(false);
 }

@@ -34,7 +34,7 @@ using namespace PBD;
 MissingPluginDialog::MissingPluginDialog (Gtk::Window& parent, Session* s, list<string> const & plugins, bool cache_valid)
 	: ArdourDialog (parent, _("Missing Plugins"), true, false)
 {
-	/* This dialog is always shown programatically. Center the window.*/
+	/* This dialog is always shown programmatically. Center the window.*/
 	set_position (Gtk::WIN_POS_CENTER);
 
 	set_session (s);
@@ -50,7 +50,7 @@ MissingPluginDialog::MissingPluginDialog (Gtk::Window& parent, Session* s, list<
 	if (cache_valid) {
 		add_button (_("OK"), RESPONSE_OK);
 		set_default_response (RESPONSE_OK);
-		t << _("It is recommended that you install the missing plugins and re-load the session.\n");
+		t << _("It is recommended that you install missing, re-scan updated plugins, and re-load the session.\n");
 	} else {
 		t << _("Third party plugins have not yet been indexed.") << "\n";
 		t << string_compose (_("Scan %1 plugins now?"),

@@ -37,9 +37,8 @@ MidiAutomationLine::MidiAutomationLine (
 	ArdourCanvas::Item&                                     parent,
 	boost::shared_ptr<ARDOUR::AutomationList>               list,
 	boost::shared_ptr<ARDOUR::MidiRegion>                   region,
-	Evoral::Parameter                                       parameter,
-	Evoral::TimeConverter<double, ARDOUR::samplepos_t>*     converter)
-	: AutomationLine (name, tav, parent, list, parameter, converter)
+	Evoral::Parameter                                       parameter)
+	: AutomationLine (name, tav, parent, list, parameter)
 	, _region (region)
 	, _parameter (parameter)
 {
@@ -49,7 +48,22 @@ MidiAutomationLine::MidiAutomationLine (
 MementoCommandBinder<ARDOUR::AutomationList>*
 MidiAutomationLine::memento_command_binder ()
 {
-	return new ARDOUR::MidiAutomationListBinder (_region->midi_source(), _parameter);
+	/* some weirdness here since _region->midi_source() returns a
+	 * shared_ptr<> but the binder accepts a reference.
+	 */
+
+	return new ARDOUR::MidiAutomationListBinder (*(_region->midi_source().get()), _parameter);
+}
+
+Temporal::timepos_t
+MidiAutomationLine::get_origin() const
+{
+	/* Events in the automation list are relative to the start of the
+	   source, not the start of the region, so we need to use the
+	   position-of-the-start-of-the-source, rather than just the
+	   position-of-the-region.
+	*/
+	return _region->source_position();
 }
 
 string
@@ -66,7 +80,7 @@ MidiAutomationLine::get_verbose_cursor_string (double fraction) const
 		return AutomationLine::get_verbose_cursor_string(fraction);
 	}
 
-	const uint8_t channel = mtv->get_channel_for_add();
+	const uint8_t channel = mtv->get_preferred_midi_channel();
 	boost::shared_ptr<const ValueNameList> value_names = mtv->route()->instrument_info().value_name_list_by_control (channel, _parameter.id());
 
 	if (!value_names) {

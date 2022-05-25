@@ -55,7 +55,7 @@ ARDOUR_UI::key_event_handler (GdkEventKey* ev, Gtk::Window* event_window)
 	Gtkmm2ext::Bindings* bindings = 0;
 	Gtk::Window* window = 0;
 
-	if (virtual_keyboard_window && virtual_keyboard_window->is_visible()) {
+	if (virtual_keyboard_window && virtual_keyboard_window->get_visible()) {
 		if (gtk_window_propagate_key_event (virtual_keyboard_window->gobj(), ev)) {
 			return true;
 		}
@@ -104,7 +104,7 @@ ARDOUR_UI::key_event_handler (GdkEventKey* ev, Gtk::Window* event_window)
 }
 
 static Gtkmm2ext::Bindings*
-get_bindings_from_widget_heirarchy (GtkWidget** w)
+get_bindings_from_widget_hierarchy (GtkWidget** w)
 {
 	void* p = NULL;
 
@@ -194,11 +194,11 @@ ARDOUR_UI::key_press_focus_accelerator_handler (Gtk::Window& window, GdkEventKey
 
 		KeyboardKey k (ev->state, ev->keyval);
 
-		/* Check heirarchy from current focus widget upwards */
+		/* Check hierarchy from current focus widget upwards */
 
 		while (focus) {
 
-			Gtkmm2ext::Bindings* focus_bindings = get_bindings_from_widget_heirarchy (&focus);
+			Gtkmm2ext::Bindings* focus_bindings = get_bindings_from_widget_hierarchy (&focus);
 
 			if (focus_bindings) {
 				DEBUG_TRACE (DEBUG::Accelerators, string_compose ("\tusing widget (%3) bindings %1 @ %2 for this event\n", focus_bindings->name(), focus_bindings, gtk_widget_get_name (focus)));
@@ -257,7 +257,7 @@ ARDOUR_UI::key_press_focus_accelerator_handler (Gtk::Window& window, GdkEventKey
 
 		while (focus) {
 
-			Gtkmm2ext::Bindings* focus_bindings = get_bindings_from_widget_heirarchy (&focus);
+			Gtkmm2ext::Bindings* focus_bindings = get_bindings_from_widget_hierarchy (&focus);
 
 			if (focus_bindings) {
 				DEBUG_TRACE (DEBUG::Accelerators, string_compose ("\tusing widget (%3) bindings %1 @ %2 for this event\n", focus_bindings->name(), focus_bindings, gtk_widget_get_name (focus)));

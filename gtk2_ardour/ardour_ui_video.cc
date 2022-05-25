@@ -48,7 +48,6 @@
 
 #include "add_video_dialog.h"
 #include "ardour_ui.h"
-#include "export_video_infobox.h"
 #include "export_video_dialog.h"
 #include "public_editor.h"
 #include "utils_videotl.h"
@@ -195,7 +194,7 @@ ARDOUR_UI::start_video_server (Gtk::Window* float_window, bool popup_msg)
 			delete video_server_process;
 		}
 
-		video_server_process = new ARDOUR::SystemExec(icsd_exec, argp);
+		video_server_process = new ARDOUR::SystemExec(icsd_exec, argp, true);
 		if (video_server_process->start()) {
 			warning << _("Cannot launch the video-server") << endmsg;
 			continue;
@@ -234,7 +233,7 @@ ARDOUR_UI::add_video (Gtk::Window* float_window)
 		add_video_dialog->set_transient_for (*float_window);
 	}
 
-	if (add_video_dialog->is_visible()) {
+	if (add_video_dialog->get_visible()) {
 		/* we're already doing this */
 		return;
 	}
@@ -363,9 +362,9 @@ ARDOUR_UI::add_video (Gtk::Window* float_window)
 			}
 		}
 
-		_session->maybe_update_session_range(
-			std::max(video_timeline->get_offset(), (ARDOUR::sampleoffset_t) 0),
-			std::max(video_timeline->get_offset() + video_timeline->get_duration(), (ARDOUR::sampleoffset_t) 0));
+		_session->maybe_update_session_range (
+			timepos_t (std::max(video_timeline->get_offset(), (sampleoffset_t) 0)),
+			timepos_t (std::max(video_timeline->get_offset() + video_timeline->get_duration(), (sampleoffset_t) 0)));
 
 
 		if (add_video_dialog->launch_xjadeo() && local_file) {
@@ -412,20 +411,6 @@ ARDOUR_UI::flush_videotimeline_cache (bool localcacheonly)
 void
 ARDOUR_UI::export_video (bool range)
 {
-	if (ARDOUR::Config->get_show_video_export_info()) {
-		ExportVideoInfobox infobox (_session);
-		Gtk::ResponseType rv = (Gtk::ResponseType) infobox.run();
-		if (infobox.show_again()) {
-			ARDOUR::Config->set_show_video_export_info(false);
-		}
-		switch (rv) {
-			case RESPONSE_YES:
-				PBD::open_uri (ARDOUR::Config->get_reference_manual_url() + "/video-timeline/operations/#export");
-				break;
-			default:
-				break;
-		}
-	}
 	export_video_dialog->set_session (_session);
 	export_video_dialog->apply_state(editor->get_selection().time, range);
 	export_video_dialog->run ();

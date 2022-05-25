@@ -21,6 +21,9 @@
 #include <cmath>
 #include <stdint.h>
 #include <cfloat>
+#include <cstdlib>
+
+#include <glib.h>
 
 #include "pbd/failed_constructor.h"
 #include "pbd/string_convert.h"
@@ -239,6 +242,10 @@ HSV::HSV (double hh, double ss, double vv, double aa)
 		/* normalize negative hue values into positive range */
 		h = 360.0 + h;
 	}
+
+	s = max (0.0, min (1.0, s));
+	v = max (0.0, min (1.0, v));
+	a = max (0.0, min (1.0, a));
 }
 
 HSV::HSV (Color c)
@@ -328,6 +335,25 @@ HSV::operator== (const HSV& other)
 }
 
 HSV
+HSV::darker (double factor) const
+{
+	HSV hsv (*this);
+	/* factor == 1.0: reduce all the way to zero */
+	hsv.v -= max (0.0, min (1.0, factor)) * hsv.v;
+	return hsv;
+}
+
+HSV
+HSV::lighter (double factor) const
+{
+	HSV hsv (*this);
+	/* factor == 1.0: increase all the way to 1.0 */
+	hsv.v += max (0.0, min (1.0, factor)) * (1.0 - hsv.v);
+	return hsv;
+}
+
+
+HSV
 HSV::shade (double factor) const
 {
 	HSV hsv (*this);
@@ -343,15 +369,21 @@ HSV::shade (double factor) const
 	*/
 
 	if (factor > 1.0) {
-		if (s < 88) {
-			hsv.v += (hsv.v * (factor * 10.0));
-		}
+		/* darker */
+		/* increase saturation (factor is > 1.0, so s grows) */
 		hsv.s *= factor;
+		if (hsv.s >= 0.88) {
+			/* above saturation threshold, so decrease v a bit */
+			hsv.v -= (hsv.v * 0.05);
+		}
 	} else {
-		if (s < 88) {
-			hsv.v -= (hsv.v * (factor * 10.0));
-		}
+		/* lighter */
+		/* reduce saturation, (factor is < 1.0, so s shrinks) */
 		hsv.s *= factor;
+		if (hsv.s > 0.88) {
+			/* still above 88% saturation, so increase v a bit */
+			hsv.v += (hsv.v * 0.05);
+		}
 	}
 
 	hsv.clamp();
@@ -697,4 +729,10 @@ Gtkmm2ext::set_source_rgb_a (cairo_t *cr, Color color, float alpha)
 		((color >>  8) & 0xff) / 255.0,
 		alpha
 		);
+}
+
+Color
+Gtkmm2ext::random_color ()
+{
+	return ((g_random_int() % 16777215) << 8 | 0xff);
 }

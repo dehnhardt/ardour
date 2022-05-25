@@ -129,7 +129,7 @@ public:
 
 	/* Abstract UI interfaces */
 
-	bool caller_is_ui_thread ();
+	bool caller_is_ui_thread () const;
 
 	/* Gtk-UI specific interfaces */
 
@@ -202,7 +202,6 @@ private:
 	bool color_picked;
 
 	void do_request (UIRequest*);
-
 };
 
 } /* namespace */

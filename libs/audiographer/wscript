@@ -26,8 +26,6 @@ def options(opt):
     autowaf.set_options(opt)
 
 def configure(conf):
-    conf.load('compiler_cxx')
-    autowaf.configure(conf)
 
     autowaf.check_pkg(conf, 'cppunit', uselib_store='CPPUNIT', atleast_version='1.12.0', mandatory=False)
     autowaf.check_pkg(conf, 'sigc++-2.0', uselib_store='SIGCPP', atleast_version='2.0', mandatory=False)
@@ -61,6 +59,7 @@ def build(bld):
     audiographer_sources = [
         'private/gdither/gdither.cc',
         'private/limiter/limiter.cc',
+        'src/general/sndfile.cc',
         'src/general/sample_format_converter.cc',
         'src/routines.cc',
         'src/debug_utils.cc',
@@ -92,7 +91,6 @@ def build(bld):
     audiographer.use            = 'libpbd'
     audiographer.vnum           = AUDIOGRAPHER_LIB_VERSION
     audiographer.install_path   = bld.env['LIBDIR']
-
 
     if bld.env['BUILD_TESTS'] and bld.is_defined('HAVE_CPPUNIT'):
         # Unit tests

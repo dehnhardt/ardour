@@ -70,6 +70,7 @@ class PatchChangeGridDialog;
 namespace ARDOUR {
 
 class Amp;
+class BeatBox;
 class DelayLine;
 class Delivery;
 class DiskReader;
@@ -94,6 +95,7 @@ class VCA;
 class SoloIsolateControl;
 class PhaseControl;
 class MonitorControl;
+class TriggerBox;
 
 class LIBARDOUR_API Route : public Stripable,
                             public GraphNode,
@@ -164,7 +166,7 @@ public:
 
 	/* end of vfunc-based API */
 
-	void shift (samplepos_t, samplecnt_t);
+	void shift (timepos_t const &, timecnt_t const &);
 
 	/* controls use set_solo() to modify this route's solo state */
 
@@ -197,11 +199,15 @@ public:
 	void         emit_pending_signals ();
 	MeterPoint   meter_point() const { return _pending_meter_point; }
 
+	void update_send_delaylines ();
+
 	void         set_meter_type (MeterType t);
 	MeterType    meter_type () const;
 
 	void set_disk_io_point (DiskIOPoint);
 	DiskIOPoint disk_io_point() const { return _disk_io_point; }
+
+	void stop_triggers (bool now);
 
 	/* Processors */
 
@@ -211,12 +217,13 @@ public:
 	boost::shared_ptr<PeakMeter>       peak_meter()       { return _meter; }
 	boost::shared_ptr<const PeakMeter> peak_meter() const { return _meter; }
 	boost::shared_ptr<PeakMeter> shared_peak_meter() const { return _meter; }
+	boost::shared_ptr<TriggerBox> triggerbox() const { return _triggerbox; }
 
 	void flush_processors ();
 
-	void foreach_processor (boost::function<void(boost::weak_ptr<Processor>)> method) {
+	void foreach_processor (boost::function<void(boost::weak_ptr<Processor>)> method) const {
 		Glib::Threads::RWLock::ReaderLock lm (_processor_lock);
-		for (ProcessorList::iterator i = _processors.begin(); i != _processors.end(); ++i) {
+		for (ProcessorList::const_iterator i = _processors.begin(); i != _processors.end(); ++i) {
 			method (boost::weak_ptr<Processor> (*i));
 		}
 	}
@@ -349,10 +356,10 @@ public:
 	bool remove_sidechain (boost::shared_ptr<Processor> proc) { return add_remove_sidechain (proc, false); }
 
 	samplecnt_t  update_signal_latency (bool apply_to_delayline = false, bool* delayline_update_needed = NULL);
-	virtual void apply_latency_compensation ();
+	void apply_latency_compensation ();
 
 	samplecnt_t  set_private_port_latencies (bool playback) const;
-	void         set_public_port_latencies (samplecnt_t, bool playback) const;
+	void         set_public_port_latencies (samplecnt_t, bool playback, bool with_latcomp) const;
 
 	samplecnt_t signal_latency() const { return _signal_latency; }
 	samplecnt_t playback_latency (bool incl_downstream = false) const;
@@ -406,7 +413,7 @@ public:
 	PBD::Signal0<void>       io_changed;
 
 	/* stateful */
-	XMLNode& get_state();
+	XMLNode& get_state() const;
 	XMLNode& get_template();
 	virtual int set_state (const XMLNode&, int version);
 
@@ -425,47 +432,39 @@ public:
 	void remove_monitor_send ();
 
 	/**
-	 * return true if this route feeds the first argument via at least one
-	 * (arbitrarily long) signal pathway.
-	 */
-	bool feeds (boost::shared_ptr<Route>, bool* via_send_only = 0);
-
-	/**
 	 * return true if this route feeds the first argument directly, via
 	 * either its main outs or a send.  This is checked by the actual
 	 * connections, rather than by what the graph is currently doing.
 	 */
-	bool direct_feeds_according_to_reality (boost::shared_ptr<Route>, bool* via_send_only = 0);
+	bool direct_feeds_according_to_reality (boost::shared_ptr<GraphNode>, bool* via_send_only = 0);
+
+	std::string graph_node_name () const {
+		return name ();
+	}
 
 	/**
-	 * return true if this route feeds the first argument directly, via
+	 * @return true if this route feeds the first argument directly, via
 	 * either its main outs or a send, according to the graph that
 	 * is currently being processed.
 	 */
 	bool direct_feeds_according_to_graph (boost::shared_ptr<Route>, bool* via_send_only = 0);
 
-	bool feeds_according_to_graph (boost::shared_ptr<Route>);
+	/**
+	 * @return true if this node feeds the first argument via at least one
+	 * (arbitrarily long) signal pathway.
+	 */
+	bool feeds (boost::shared_ptr<Route>);
 
-	struct FeedRecord {
-		boost::weak_ptr<Route> r;
-		bool sends_only;
+	/**
+	 * @return a list of all routes that eventually may feed a signal
+	 * into this route.
+	 */
+	std::set<boost::shared_ptr<Route>> signal_sources (bool via_sends_only = false);
 
-		FeedRecord (boost::shared_ptr<Route> rp, bool sendsonly)
-		: r (rp)
-		, sends_only (sendsonly) {}
-	};
-
-	struct FeedRecordCompare {
-		bool operator() (const FeedRecord& a, const FeedRecord& b) const {
-			return a.r < b.r;
-		}
-	};
-
-	typedef std::set<FeedRecord,FeedRecordCompare> FedBy;
-
-	const FedBy& fed_by() const { return _fed_by; }
-	void clear_fed_by ();
-	bool add_fed_by (boost::shared_ptr<Route>, bool sends_only);
+	/** Follow output port connections and check if the output *port*
+	 * of any downstream routes is connected.
+	 */
+	bool output_effectively_connected () const;
 
 	/* Controls (not all directly owned by the Route) */
 
@@ -592,6 +591,8 @@ public:
 protected:
 	friend class Session;
 
+	void process ();
+
 	void catch_up_on_solo_mute_override ();
 	void set_listen (bool);
 
@@ -638,7 +639,9 @@ protected:
 	boost::shared_ptr<Pannable>         _pannable;
 	boost::shared_ptr<DiskReader>       _disk_reader;
 	boost::shared_ptr<DiskWriter>       _disk_writer;
-
+#ifdef HAVE_BEATBOX
+	boost::shared_ptr<BeatBox>       _beatbox;
+#endif
 	boost::shared_ptr<MonitorControl>   _monitoring_control;
 
 	DiskIOPoint _disk_io_point;
@@ -670,7 +673,6 @@ protected:
 	std::string    _comment;
 	bool           _have_internal_generator;
 	DataType       _default_type;
-	FedBy          _fed_by;
 
 	InstrumentInfo _instrument_info;
 	bool           _instrument_fanned_out;
@@ -678,7 +680,7 @@ protected:
 
 	virtual ChanCount input_streams () const;
 
-	virtual XMLNode& state (bool save_template);
+	virtual XMLNode& state (bool save_template) const;
 
 	int configure_processors (ProcessorStreams*);
 
@@ -700,6 +702,7 @@ protected:
 	boost::shared_ptr<Amp>               _volume;
 	boost::shared_ptr<PeakMeter>         _meter;
 	boost::shared_ptr<PolarityProcessor> _polarity;
+	boost::shared_ptr<TriggerBox>        _triggerbox;
 
 	bool _volume_applies_to_output;
 
@@ -728,6 +731,9 @@ private:
 
 	bool input_port_count_changing (ChanCount);
 	bool output_port_count_changing (ChanCount);
+
+	bool output_effectively_connected_real () const;
+	mutable std::map<Route*, bool> _connection_cache;
 
 	int configure_processors_unlocked (ProcessorStreams*, Glib::Threads::RWLock::WriterLock*);
 	bool set_meter_point_unlocked ();

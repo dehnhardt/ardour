@@ -108,7 +108,7 @@ public:
 	FUID const& fuid () const { return _fuid; }
 
 	/* Ardour Preset Helpers */
-	Vst::IUnitInfo* unit_info ();
+	IPtr<Vst::IUnitInfo> unit_info ();
 	Vst::ParameterInfo const& program_change_port () const { return _program_change_port; }
 
 	void set_n_factory_presets (size_t n) { _n_factory_presets = n; }
@@ -221,7 +221,7 @@ private:
 	void psl_subscribe_to (boost::shared_ptr<ARDOUR::AutomationControl>, FIDString);
 	void psl_stripable_property_changed (PBD::PropertyChange const&);
 
-	void foward_signal (Presonus::IContextInfoHandler2*, FIDString) const;
+	void forward_signal (Presonus::IContextInfoHandler2*, FIDString) const;
 
 	boost::shared_ptr<ARDOUR::VST3PluginModule> _module;
 
@@ -237,8 +237,8 @@ private:
 	Linux::IRunLoop* _run_loop;
 #endif
 
-	FUnknownPtr<Vst::IAudioProcessor> _processor;
-	Vst::ProcessContext               _context;
+	IPtr<Vst::IAudioProcessor> _processor;
+	Vst::ProcessContext        _context;
 
 	/* Parameters */
 	Vst3ParameterChanges _input_param_changes;
@@ -390,8 +390,6 @@ private:
 	void        forward_resize_view (int w, int h);
 	void        parameter_change_handler (Steinberg::VST3PI::ParameterChange, uint32_t, float);
 
-	PBD::Searchpath preset_search_path () const;
-
 	Steinberg::VST3PI* _plug;
 
 	PBD::ScopedConnectionList _connections;
@@ -413,6 +411,7 @@ public:
 	PluginPtr                         load (Session& session);
 	std::vector<Plugin::PresetRecord> get_presets (bool user_only) const;
 	bool                              is_instrument () const;
+	PBD::Searchpath                   preset_search_path () const;
 
 	boost::shared_ptr<VST3PluginModule> m;
 };

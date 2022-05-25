@@ -404,7 +404,7 @@ Push2::init_buttons (bool startup)
 
 		ButtonID off_buttons[] = { TapTempo, Setup, User, Stop, Convert, New, FixedLength,
 		                           Fwd32ndT, Fwd32nd, Fwd16thT, Fwd16th, Fwd8thT, Fwd8th, Fwd4trT, Fwd4tr,
-		                           Accent, Note, Session,  };
+		                           Accent, Note };
 
 		for (size_t n = 0; n < sizeof (off_buttons) / sizeof (off_buttons[0]); ++n) {
 			boost::shared_ptr<Button> b = id_button_map[off_buttons[n]];
@@ -975,7 +975,7 @@ Push2::notify_solo_active_changed (bool yn)
 }
 
 XMLNode&
-Push2::get_state()
+Push2::get_state() const
 {
 	XMLNode& node (ControlProtocol::get_state());
 	XMLNode* child;
@@ -1078,10 +1078,11 @@ Push2::other_vpot_touch (int n, bool touching)
 		if (master) {
 			boost::shared_ptr<AutomationControl> ac = master->gain_control();
 			if (ac) {
+				const timepos_t now (session->audible_sample());
 				if (touching) {
-					ac->start_touch (session->audible_sample());
+					ac->start_touch (now);
 				} else {
-					ac->stop_touch (session->audible_sample());
+					ac->stop_touch (now);
 				}
 			}
 		}

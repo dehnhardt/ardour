@@ -26,6 +26,7 @@
 #include "pbd/xml++.h"
 
 #include "ardour/amp.h"
+#include "ardour/audioengine.h"
 #include "ardour/boost_debug.h"
 #include "ardour/buffer_set.h"
 #include "ardour/debug.h"
@@ -51,6 +52,7 @@ using namespace PBD;
 using namespace std;
 
 PBD::Signal0<void> LatentSend::ChangedLatency;
+PBD::Signal0<void> LatentSend::QueueUpdate;
 
 LatentSend::LatentSend ()
 		: _delay_in (0)
@@ -95,7 +97,7 @@ Send::Send (Session& s, boost::shared_ptr<Pannable> p, boost::shared_ptr<MuteMas
 {
 	//boost_debug_shared_ptr_mark_interesting (this, "send");
 
-	boost::shared_ptr<AutomationList> gl (new AutomationList (Evoral::Parameter (BusSendLevel)));
+	boost::shared_ptr<AutomationList> gl (new AutomationList (Evoral::Parameter (BusSendLevel), time_domain()));
 	_gain_control = boost::shared_ptr<GainControl> (new GainControl (_session, Evoral::Parameter(BusSendLevel), gl));
 	_gain_control->set_flag (Controllable::InlineControl);
 	add_control (_gain_control);
@@ -152,7 +154,7 @@ Send::signal_latency () const
 }
 
 void
-Send::update_delaylines ()
+Send::update_delaylines (bool rt_ok)
 {
 	if (_role == Listen) {
 		/* Don't align monitor-listen (just yet).
@@ -166,6 +168,19 @@ Send::update_delaylines ()
 		return;
 	}
 
+	if (!rt_ok && AudioEngine::instance()->running() && AudioEngine::instance()->in_process_thread ()) {
+		if (_delay_out > _delay_in) {
+			if (_send_delay->delay () != 0 || _thru_delay->delay () != _delay_out - _delay_in) {
+				QueueUpdate (); /* EMIT SIGNAL */
+			}
+		}else {
+			if (_thru_delay->delay () != 0 || _send_delay->delay () != _delay_in - _delay_out) {
+				QueueUpdate (); /* EMIT SIGNAL */
+			}
+		}
+		return;
+	}
+
 	bool changed;
 	if (_delay_out > _delay_in) {
 		changed = _thru_delay->set_delay(_delay_out - _delay_in);
@@ -175,10 +190,7 @@ Send::update_delaylines ()
 		_send_delay->set_delay(_delay_in - _delay_out);
 	}
 
-	if (changed) {
-		// TODO -- ideally postpone for effective no-op changes
-		// (in case both  _delay_out and _delay_in are changed by the
-		// same amount in a single latency-update cycle).
+	if (changed && !AudioEngine::instance()->in_process_thread ()) {
 		ChangedLatency (); /* EMIT SIGNAL */
 	}
 }
@@ -195,7 +207,7 @@ Send::set_delay_in (samplecnt_t delay)
 			string_compose ("Send::set_delay_in %1: (%2) - %3 = %4\n",
 				name (), _delay_in, _delay_out, _delay_in - _delay_out));
 
-	update_delaylines ();
+	update_delaylines (false);
 }
 
 void
@@ -209,7 +221,7 @@ Send::set_delay_out (samplecnt_t delay, size_t /*bus*/)
 			string_compose ("Send::set_delay_out %1: %2 - (%3) = %4\n",
 				name (), _delay_in, _delay_out, _delay_in - _delay_out));
 
-	update_delaylines ();
+	update_delaylines (true);
 }
 
 void
@@ -221,10 +233,9 @@ Send::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample, do
 		return;
 	}
 
-	if (!_active && !_pending_active) {
+	if (!check_active()) {
 		_meter->reset ();
 		_output->silence (nframes);
-		_active = _pending_active;
 		return;
 	}
 
@@ -263,7 +274,7 @@ Send::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample, do
 }
 
 XMLNode&
-Send::state ()
+Send::state () const
 {
 	XMLNode& node = Delivery::state ();
 
@@ -466,6 +477,9 @@ Send::can_support_io_configuration (const ChanCount& in, ChanCount& out)
 bool
 Send::configure_io (ChanCount in, ChanCount out)
 {
+	ChanCount send_count = in;
+	send_count.set(DataType::AUDIO, pan_outs());
+
 	if (!_amp->configure_io (in, out)) {
 		return false;
 	}
@@ -474,7 +488,7 @@ Send::configure_io (ChanCount in, ChanCount out)
 		return false;
 	}
 
-	if (!_meter->configure_io (ChanCount (DataType::AUDIO, pan_outs()), ChanCount (DataType::AUDIO, pan_outs()))) {
+	if (!_meter->configure_io (send_count, send_count)) {
 		return false;
 	}
 
@@ -482,7 +496,7 @@ Send::configure_io (ChanCount in, ChanCount out)
 		return false;
 	}
 
-	if (!_send_delay->configure_io (ChanCount (DataType::AUDIO, pan_outs()), ChanCount (DataType::AUDIO, pan_outs()))) {
+	if (!_send_delay->configure_io (send_count, send_count)) {
 		return false;
 	}
 

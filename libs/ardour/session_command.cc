@@ -45,6 +45,7 @@ class Command;
 
 using namespace PBD;
 using namespace ARDOUR;
+using namespace Temporal;
 
 #include "pbd/i18n.h"
 
@@ -109,10 +110,8 @@ Session::memento_command_factory(XMLNode *n)
     } else if (type_name == "ARDOUR::Locations") {
 	    return new MementoCommand<Locations>(*_locations, before, after);
 
-    } else if (type_name == "ARDOUR::TempoMap") {
-	    return new MementoCommand<TempoMap>(*_tempo_map, before, after);
-
     } else if (type_name == "ARDOUR::Playlist" || type_name == "ARDOUR::AudioPlaylist" || type_name == "ARDOUR::MidiPlaylist") {
+
 	    if (boost::shared_ptr<Playlist> pl = _playlists->by_name(child->property("name")->value())) {
 		    return new MementoCommand<Playlist>(*(pl.get()), before, after);
 	    }
@@ -145,6 +144,9 @@ Session::memento_command_factory(XMLNode *n)
 
     /* we failed */
     info << string_compose (_("Could not reconstitute MementoCommand from XMLNode. object type = %1 id = %2"), type_name, id.to_s()) << endmsg;
+
+    delete after;
+    delete before;
 
     return 0 ;
 }

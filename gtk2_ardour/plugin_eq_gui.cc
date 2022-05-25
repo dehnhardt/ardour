@@ -126,12 +126,12 @@ PluginEqGui::PluginEqGui (boost::shared_ptr<ARDOUR::PluginInsert> pluginInsert)
 	dBSelectBin->add (*manage(dBScaleCombo));
 
 	_live_signal_combo = new Gtk::ComboBoxText ();
-	_live_signal_combo->append_text (_("Off"));
-	_live_signal_combo->append_text (_("Output / Input"));
-	_live_signal_combo->append_text (_("Input"));
-	_live_signal_combo->append_text (_("Output"));
-	_live_signal_combo->append_text (_("Input +40dB"));
-	_live_signal_combo->append_text (_("Output +40dB"));
+	_live_signal_combo->append (_("Off"));
+	_live_signal_combo->append (_("Output / Input"));
+	_live_signal_combo->append (_("Input"));
+	_live_signal_combo->append (_("Output"));
+	_live_signal_combo->append (_("Input +40dB"));
+	_live_signal_combo->append (_("Output +40dB"));
 	_live_signal_combo->set_active (0);
 
 	Gtk::Label *live_signal_label = new Gtk::Label (_("Live signal:"));
@@ -229,7 +229,7 @@ PluginEqGui::stop_updating ()
 void
 PluginEqGui::start_updating ()
 {
-	if (!_update_connection.connected() && is_visible()) {
+	if (!_update_connection.connected() && get_visible()) {
 		_update_connection = Glib::signal_timeout().connect (sigc::mem_fun (this, &PluginEqGui::timeout_callback), 250, Glib::PRIORITY_DEFAULT_IDLE);
 	}
 }
@@ -407,7 +407,7 @@ PluginEqGui::run_impulse_analysis ()
 	/* run at most at session's block size chunks.
 	 *
 	 * This is important since VSTs may call audioMasterGetBlockSize
-	 * or access various other /real/ session paramaters using the
+	 * or access various other /real/ session parameters using the
 	 * audioMasterCallback
 	 */
 	samplecnt_t block_size = ARDOUR_UI::instance()->the_session()->get_block_size();

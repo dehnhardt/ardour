@@ -28,7 +28,6 @@
 #include "evoral/EventList.h"
 #include "evoral/Control.h"
 
-#include "ardour/beats_samples_converter.h"
 #include "ardour/debug.h"
 #include "ardour/midi_model.h"
 #include "ardour/midi_playlist.h"
@@ -78,8 +77,8 @@ MidiPlaylist::MidiPlaylist (boost::shared_ptr<const MidiPlaylist> other, string 
 }
 
 MidiPlaylist::MidiPlaylist (boost::shared_ptr<const MidiPlaylist> other,
-                            samplepos_t                            start,
-                            samplecnt_t                            dur,
+                            timepos_t  const &                    start,
+                            timepos_t  const &                    dur,
                             string                                name,
                             bool                                  hidden)
 	: Playlist (other, start, dur, name, hidden)
@@ -196,14 +195,14 @@ MidiPlaylist::destroy_region (boost::shared_ptr<Region> region)
 	return changed;
 }
 void
-MidiPlaylist::_split_region (boost::shared_ptr<Region> region, const MusicSample& playlist_position, ThawList& thawlist)
+MidiPlaylist::_split_region (boost::shared_ptr<Region> region, timepos_t const & playlist_position, ThawList& thawlist)
 {
-	if (!region->covers (playlist_position.sample)) {
+	if (!region->covers (playlist_position)) {
 		return;
 	}
 
-	if (region->position() == playlist_position.sample ||
-	    region->last_sample() == playlist_position.sample) {
+	if (region->position() == playlist_position ||
+	    region->nt_last() == playlist_position) {
 		return;
 	}
 
@@ -218,22 +217,16 @@ MidiPlaylist::_split_region (boost::shared_ptr<Region> region, const MusicSample
 
 	string before_name;
 	string after_name;
-	const double before_qn = _session.tempo_map().exact_qn_at_sample (playlist_position.sample, playlist_position.division) - region->quarter_note();
-	const double after_qn = mr->length_beats() - before_qn;
-	MusicSample before (playlist_position.sample - region->position(), playlist_position.division);
-	MusicSample after (region->length() - before.sample, playlist_position.division);
 
-	/* split doesn't change anything about length, so don't try to splice */
-	bool old_sp = _splicing;
-	_splicing = true;
+	const timecnt_t before = region->position().distance (playlist_position);
+	const timecnt_t after = region->length() - before;
 
 	RegionFactory::region_name (before_name, region->name(), false);
 
 	{
 		PropertyList plist;
 
-		plist.add (Properties::length, before.sample);
-		plist.add (Properties::length_beats, before_qn);
+		plist.add (Properties::length, before);
 		plist.add (Properties::name, before_name);
 		plist.add (Properties::left_of_split, true);
 		plist.add (Properties::layering_index, region->layering_index ());
@@ -243,7 +236,7 @@ MidiPlaylist::_split_region (boost::shared_ptr<Region> region, const MusicSample
 		   since it supplies that offset to the Region constructor, which
 		   is necessary to get audio region gain envelopes right.
 		*/
-		left = RegionFactory::create (region, MusicSample (0, 0), plist, true, &thawlist);
+	        left = RegionFactory::create (region, plist, true, &thawlist);
 	}
 
 	RegionFactory::region_name (after_name, region->name(), false);
@@ -251,8 +244,7 @@ MidiPlaylist::_split_region (boost::shared_ptr<Region> region, const MusicSample
 	{
 		PropertyList plist;
 
-		plist.add (Properties::length, after.sample);
-		plist.add (Properties::length_beats, after_qn);
+		plist.add (Properties::length, after);
 		plist.add (Properties::name, after_name);
 		plist.add (Properties::right_of_split, true);
 		plist.add (Properties::layering_index, region->layering_index ());
@@ -262,12 +254,10 @@ MidiPlaylist::_split_region (boost::shared_ptr<Region> region, const MusicSample
 		right = RegionFactory::create (region, before, plist, true, &thawlist);
 	}
 
-	add_region_internal (left, region->position(), thawlist, 0, region->quarter_note(), true);
-	add_region_internal (right, region->position() + before.sample, thawlist, before.division, region->quarter_note() + before_qn, true);
+	add_region_internal (left, region->position(), thawlist);
+	add_region_internal (right, region->position() + before, thawlist);
 
 	remove_region_internal (region, thawlist);
-
-	_splicing = old_sp;
 }
 
 set<Evoral::Parameter>
@@ -297,7 +287,7 @@ MidiPlaylist::contained_automation()
 void
 MidiPlaylist::render (MidiChannelFilter* filter)
 {
-	typedef pair<MidiStateTracker*,samplepos_t> TrackerInfo;
+	typedef pair<MidiNoteTracker*,samplepos_t> TrackerInfo;
 
 	Playlist::RegionReadLock rl (this);
 

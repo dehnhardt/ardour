@@ -24,6 +24,8 @@
 
 namespace ARDOUR {
 
+class PhaseControl;
+
 class LIBARDOUR_API PolarityProcessor : public Processor
 {
 public:
@@ -39,7 +41,7 @@ public:
 	}
 
 protected:
-	XMLNode& state ();
+	XMLNode& state () const;
 
 private:
 	boost::shared_ptr<PhaseControl> _control;

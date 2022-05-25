@@ -42,7 +42,7 @@ AudioPort::AudioPort (const std::string& name, PortFlags flags)
 	, _data (0)
 {
 	assert (name.find_first_of (':') == string::npos);
-	_src.setup (_resampler_quality);
+	_src.setup (resampler_quality ());
 	_src.set_rrfilt (10);
 }
 
@@ -69,7 +69,6 @@ AudioPort::cycle_start (pframes_t nframes)
 		_buffer->prepare ();
 	} else if (!externally_connected ()) {
 		/* ardour internal port, just silence input, don't resample */
-		// TODO reset resampler only once
 		_src.reset ();
 		memset (_data, 0, _cycle_nframes * sizeof (float));
 	} else {
@@ -125,6 +124,12 @@ AudioPort::cycle_end (pframes_t nframes)
 void
 AudioPort::cycle_split ()
 {
+}
+
+void
+AudioPort::reinit ()
+{
+	_src.reset ();
 }
 
 AudioBuffer&

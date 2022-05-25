@@ -25,6 +25,7 @@
 
 #include "temporal/beats.h"
 #include "ardour/midi_buffer.h"
+#include "ardour/source.h"
 
 namespace Evoral {
 template <typename T> class EventSink;
@@ -37,20 +38,25 @@ class MidiSource;
 /** Tracks played notes, so they can be resolved in potential stuck note
  * situations (e.g. looping, transport stop, etc).
  */
-class LIBARDOUR_API MidiStateTracker
+class LIBARDOUR_API MidiNoteTracker
 {
 public:
-	MidiStateTracker();
+	MidiNoteTracker();
+	virtual ~MidiNoteTracker() {}
+
+	virtual void track (const uint8_t* evbuf);
+	virtual void dump (std::ostream&);
+	virtual void reset ();
 
 	void track (const MidiBuffer::const_iterator& from, const MidiBuffer::const_iterator& to);
-	void track (const uint8_t* evbuf);
 	void add (uint8_t note, uint8_t chn);
 	void remove (uint8_t note, uint8_t chn);
-	void resolve_notes (MidiBuffer& buffer, samplepos_t time);
+	void resolve_notes (MidiBuffer& buffer, samplepos_t time, bool reset = true);
 	void resolve_notes (Evoral::EventSink<samplepos_t>& buffer, samplepos_t time);
-	void resolve_notes (MidiSource& src, const Glib::Threads::Mutex::Lock& lock, Temporal::Beats time);
-	void dump (std::ostream&);
-	void reset ();
+	void resolve_notes (MidiSource& src, const Source::WriterLock& lock, Temporal::Beats time);
+
+	void flush_notes (MidiBuffer& buffer, samplepos_t time, bool reset = true);
+
 	bool empty() const { return _on == 0; }
 	uint16_t on() const { return _on; }
 	bool active (uint8_t note, uint8_t channel) {
@@ -65,8 +71,29 @@ public:
 private:
 	uint8_t  _active_notes[128*16];
 	uint16_t _on;
+
+	void push_notes (MidiBuffer &dst, samplepos_t time, bool reset, int cmd, int velocity);
+
 };
 
+class LIBARDOUR_API MidiStateTracker : public MidiNoteTracker
+{
+  public:
+	MidiStateTracker ();
+	~MidiStateTracker() {}
+
+	void track (const uint8_t* evbuf);
+	void dump (std::ostream&);
+	void reset ();
+
+	void flush (MidiBuffer&, samplepos_t, bool reset);
+
+  private:
+	uint8_t  program[16];
+	uint16_t bender[16];
+	uint16_t pressure[16];
+	uint8_t  control[16][127];
+};
 
 } // namespace ARDOUR
 

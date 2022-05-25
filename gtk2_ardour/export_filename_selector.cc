@@ -34,21 +34,21 @@
 using namespace ARDOUR;
 
 ExportFilenameSelector::ExportFilenameSelector ()
-	: include_label ("", Gtk::ALIGN_LEFT)
-	, label_label (_("Label:"), Gtk::ALIGN_LEFT)
+	: include_label ("", Gtk::ALIGN_START)
+	, label_label (_("Label:"), Gtk::ALIGN_START)
 	, timespan_checkbox (_("Timespan Name"))
 	, revision_checkbox (_("Revision:"))
-	, path_label (_("Folder:"), Gtk::ALIGN_LEFT)
+	, path_label (_("Folder:"), Gtk::ALIGN_START)
 	, browse_button (_("Browse"))
 	, open_button (_("Open Folder"))
-	, example_filename_label ("", Gtk::ALIGN_LEFT)
+	, example_filename_label ("", Gtk::ALIGN_START)
 	, _require_timespan (false)
 {
 	include_label.set_markup (_("Build filename(s) from these components:"));
 
-	session_snap_name.append_text (_("No Name"));
-	session_snap_name.append_text (_("Session Name"));
-	session_snap_name.append_text (_("Snapshot Name"));
+	session_snap_name.append (_("No Name"));
+	session_snap_name.append (_("Session Name"));
+	session_snap_name.append (_("Snapshot Name"));
 	session_snap_name.set_active (0);
 
 	pack_start (path_hbox, false, false, 12);

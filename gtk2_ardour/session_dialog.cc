@@ -251,7 +251,7 @@ SessionDialog::master_channel_count ()
 bool
 SessionDialog::use_session_template () const
 {
-	if (!back_button->sensitive () && !new_only) {
+	if (!back_button->is_sensitive () && !new_only) {
 		/* open session -- not create a new one */
 		return false;
 	}
@@ -473,7 +473,7 @@ SessionDialog::setup_initial_choice_box ()
 	/* --disable plugins UI */
 
 	_disable_plugins.set_label (_("Safe Mode: Disable all Plugins"));
-	_disable_plugins.set_flags (Gtk::CAN_FOCUS);
+	_disable_plugins.set_can_focus ();
 	_disable_plugins.set_relief (Gtk::RELIEF_NORMAL);
 	_disable_plugins.set_mode (true);
 	_disable_plugins.set_active (ARDOUR::Session::get_disable_all_loaded_plugins());
@@ -601,8 +601,8 @@ SessionDialog::populate_session_templates ()
 	row[session_template_columns.name] = (_("Empty Template"));
 	row[session_template_columns.path] = string();
 	row[session_template_columns.description] = _("An empty session with factory default settings.\n\nSelect this option if you are importing files to mix.");
-	row[session_template_columns.modified_with_short] = _("");
-	row[session_template_columns.modified_with_long] = _("");
+	row[session_template_columns.modified_with_short] = ("");
+	row[session_template_columns.modified_with_long] = ("");
 
 	//auto-select the first item in the list
 	Gtk::TreeModel::Row first = template_model->children()[0];

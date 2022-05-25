@@ -396,13 +396,13 @@ Panner2in2out::distribute_one_automated (AudioBuffer& srcbuf, BufferSet& obufs,
 
 	/* fetch positional data */
 
-	if (!_pannable->pan_azimuth_control->list ()->curve ().rt_safe_get_vector (start, end, position, nframes)) {
+	if (!_pannable->pan_azimuth_control->list ()->curve ().rt_safe_get_vector (timepos_t (start), timepos_t (end), position, nframes)) {
 		/* fallback */
 		distribute_one (srcbuf, obufs, 1.0, nframes, which);
 		return;
 	}
 
-	if (!_pannable->pan_width_control->list ()->curve ().rt_safe_get_vector (start, end, width, nframes)) {
+	if (!_pannable->pan_width_control->list ()->curve ().rt_safe_get_vector (timepos_t (start), timepos_t (end), width, nframes)) {
 		/* fallback */
 		distribute_one (srcbuf, obufs, 1.0, nframes, which);
 		return;
@@ -475,7 +475,7 @@ Panner2in2out::factory (boost::shared_ptr<Pannable> p, boost::shared_ptr<Speaker
 }
 
 XMLNode&
-Panner2in2out::get_state ()
+Panner2in2out::get_state () const
 {
 	XMLNode& root (Panner::get_state ());
 	root.set_property (X_ ("uri"), _descriptor.panner_uri);

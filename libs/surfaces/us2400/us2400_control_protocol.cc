@@ -122,6 +122,7 @@ US2400Protocol::US2400Protocol (Session& session)
 	, state_version (0)
 	, marker_modifier_consumed_by_button (false)
 	, nudge_modifier_consumed_by_button (false)
+	, _sends_bank (0)
 {
 	DEBUG_TRACE (DEBUG::US2400, "US2400Protocol::US2400Protocol\n");
 
@@ -844,7 +845,7 @@ US2400Protocol::close()
  *  contains a state node for the device, it will deleted and replaced.
  */
 void
-US2400Protocol::update_configuration_state ()
+US2400Protocol::update_configuration_state () const
 {
 	/* CALLER MUST HOLD SURFACES LOCK */
 
@@ -860,15 +861,15 @@ US2400Protocol::update_configuration_state ()
 
 	XMLNode* snode = new XMLNode (X_("Surfaces"));
 
-	for (Surfaces::iterator s = surfaces.begin(); s != surfaces.end(); ++s) {
-		snode->add_child_nocopy ((*s)->get_state());
+	for (auto const & s : surfaces) {
+		snode->add_child_nocopy (s->get_state());
 	}
 
 	devnode->add_child_nocopy (*snode);
 }
 
 XMLNode&
-US2400Protocol::get_state()
+US2400Protocol::get_state() const
 {
 	XMLNode& node (ControlProtocol::get_state());
 
@@ -1875,6 +1876,7 @@ US2400Protocol::is_mapped (boost::shared_ptr<Stripable> r) const
 void
 US2400Protocol::stripable_selection_changed ()
 {
+	_sends_bank = 0;
 	//this function is called after the stripable selection is "stable", so this is the place to check surface selection state
 	for (Surfaces::iterator si = surfaces.begin(); si != surfaces.end(); ++si) {
 		(*si)->update_strip_selection ();
@@ -1987,4 +1989,10 @@ US2400Protocol::set_automation_state (AutoState as)
 	}
 
 	ac->set_automation_state (as);
+}
+
+int
+US2400Protocol::get_sends_bank ()
+{
+	return _sends_bank;
 }

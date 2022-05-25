@@ -57,6 +57,7 @@
 
 #include "new_user_wizard.h"
 #include "opts.h"
+#include "splash.h"
 #include "ui_config.h"
 #include "pbd/i18n.h"
 #include "utils.h"
@@ -70,7 +71,8 @@ using namespace ARDOUR;
 using namespace ARDOUR_UI_UTILS;
 
 NewUserWizard::NewUserWizard ()
-	: config_modified (false)
+	: _splash_pushed (false)
+	, config_modified (false)
 	, default_dir_chooser (0)
 	, monitor_via_hardware_button (string_compose (_("Use an external mixer or the hardware mixer of your audio interface.\n"
 							 "%1 will play NO role in monitoring"), PROGRAM_NAME))
@@ -116,6 +118,7 @@ NewUserWizard::NewUserWizard ()
 
 NewUserWizard::~NewUserWizard ()
 {
+	pop_splash ();
 }
 
 bool
@@ -156,10 +159,10 @@ using the program.</span> \
 	Label* bazmatic = manage (new Label);
 	bazmatic->set_markup (_("<small><i>This can later be changed in Preferences &gt; Appearance.</i></small>"));
 
-	ui_font_scale.append_text (_("100%"));
-	ui_font_scale.append_text (_("150%"));
-	ui_font_scale.append_text (_("200%"));
-	ui_font_scale.append_text (_("250%"));
+	ui_font_scale.append (_("100%"));
+	ui_font_scale.append (_("150%"));
+	ui_font_scale.append (_("200%"));
+	ui_font_scale.append (_("250%"));
 	ui_font_scale.set_active_text (_("100%"));
 
 	HBox* hbox = manage (new HBox);
@@ -500,7 +503,7 @@ NewUserWizard::on_apply ()
 				continue;
 			}
 			/* skip sessions that are already in 'recent'.
-			 * eg. a new user changed <session-default-dir> shorly after installation
+			 * eg. a new user changed <session-default-dir> shortly after installation
 			 */
 			for (ARDOUR::RecentSessions::iterator r = rs.begin(); r != rs.end(); ++r) {
 				if ((*r).first == name) {
@@ -525,4 +528,43 @@ void
 NewUserWizard::move_along_now ()
 {
 	on_apply ();
+}
+
+void
+NewUserWizard::on_show ()
+{
+	Gtk::Assistant::on_show ();
+	push_splash ();
+}
+
+void
+NewUserWizard::on_unmap ()
+{
+	pop_splash ();
+	Gtk::Assistant::on_unmap ();
+}
+
+void
+NewUserWizard::pop_splash ()
+{
+	if (_splash_pushed) {
+		Splash* spl = Splash::exists () ? Splash::instance() : NULL;
+		if (spl) {
+			spl->pop_front_for (*this);
+		}
+		_splash_pushed = false;
+	}
+}
+
+
+void
+NewUserWizard::push_splash ()
+{
+	if (Splash::exists()) {
+		Splash* spl = Splash::instance();
+		if (spl->get_visible()) {
+			spl->pop_back_for (*this);
+			_splash_pushed = true;
+		}
+	}
 }

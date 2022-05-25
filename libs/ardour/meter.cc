@@ -42,7 +42,7 @@ using namespace std;
 using namespace ARDOUR;
 
 PeakMeter::PeakMeter (Session& s, const std::string& name)
-    : Processor (s, string_compose ("meter-%1", name))
+	: Processor (s, string_compose ("meter-%1", name), Temporal::AudioTime)
 {
 	Kmeterdsp::init  (s.nominal_sample_rate ());
 	Iec1ppmdsp::init (s.nominal_sample_rate ());
@@ -92,7 +92,7 @@ PeakMeter::display_name () const
 void
 PeakMeter::run (BufferSet& bufs, samplepos_t /*start_sample*/, samplepos_t /*end_sample*/, double /*speed*/, pframes_t nframes, bool)
 {
-	if (!_active && !_pending_active) {
+	if (!check_active()) {
 		return;
 	}
 
@@ -196,8 +196,6 @@ PeakMeter::run (BufferSet& bufs, samplepos_t /*start_sample*/, samplepos_t /*end
 	if (_bufcnt > zoh) {
 		_bufcnt = 0;
 	}
-
-	_active = _pending_active;
 }
 
 void
@@ -463,7 +461,7 @@ PeakMeter::set_meter_type (MeterType t)
 }
 
 XMLNode&
-PeakMeter::state ()
+PeakMeter::state () const
 {
 	XMLNode& node (Processor::state ());
 	node.set_property ("type", "meter");

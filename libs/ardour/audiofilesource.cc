@@ -184,7 +184,11 @@ AudioFileSource::construct_peak_filepath (const string& audio_path, const bool i
 		base = audio_path;
 	}
 	base += '%';
-	base += (char) ('A' + _channel);
+	if (_channel < 26) {
+		base += (char) ('A' + _channel);
+	} else {
+		base +=  string_compose ("%1", _channel + 1);
+	}
 	return _session.construct_peak_filepath (base, in_session, old_peak_name);
 }
 
@@ -217,7 +221,7 @@ AudioFileSource::get_soundfile_info (const string& path, SoundFileInfo& _info, s
 }
 
 XMLNode&
-AudioFileSource::get_state ()
+AudioFileSource::get_state () const
 {
 	XMLNode& root (AudioSource::get_state());
 	root.set_property (X_("channel"), _channel);
@@ -245,7 +249,7 @@ AudioFileSource::set_state (const XMLNode& node, int version)
 }
 
 void
-AudioFileSource::mark_streaming_write_completed (const Lock& lock)
+AudioFileSource::mark_streaming_write_completed (const WriterLock& lock)
 {
 	if (!writable()) {
 		return;
@@ -331,7 +335,7 @@ AudioFileSource::safe_audio_file_extension(const string& file)
 		".smp", ".SMP",
 		".snd", ".SND",
 		".maud", ".MAUD",
-		".voc", ".VOC"
+		".voc", ".VOC",
 		".vwe", ".VWE",
 		".w64", ".W64",
 		".wav", ".WAV",
@@ -352,7 +356,8 @@ AudioFileSource::safe_audio_file_extension(const string& file)
 	};
 
 	for (size_t n = 0; n < sizeof(suffixes)/sizeof(suffixes[0]); ++n) {
-		if (file.rfind (suffixes[n]) == file.length() - strlen (suffixes[n])) {
+		size_t pos = file.rfind (suffixes[n]);
+		if (pos > 0 && pos == file.length() - strlen(suffixes[n])) {
 			return true;
 		}
 	}

@@ -20,6 +20,14 @@
 #include "pbd/semutils.h"
 #include "pbd/failed_constructor.h"
 
+#ifdef USE_FUTEX_SEMAPHORE
+#include <errno.h>
+#include <linux/futex.h>
+#include <sched.h>
+#include <syscall.h>
+#include <unistd.h>
+#endif
+
 using namespace PBD;
 
 Semaphore::Semaphore (const char* name, int val)
@@ -41,6 +49,9 @@ Semaphore::Semaphore (const char* name, int val)
 		throw failed_constructor ();
 	}
 
+#elif defined USE_FUTEX_SEMAPHORE
+	(void)name; /* stop warning */
+	_value = val;
 #else
 	(void) name; /* stop gcc warning on !Apple systems */
 
@@ -86,6 +97,36 @@ Semaphore::reset ()
 		result = WaitForSingleObject(_sem, 0);
 	} while (result == WAIT_OBJECT_0);
 	return rv;
+}
+
+#elif defined USE_FUTEX_SEMAPHORE
+
+int
+Semaphore::signal ()
+{
+	if (std::atomic_fetch_add_explicit (&_value, 1, std::memory_order_relaxed) < 0) {
+		while (syscall (__NR_futex, &_futex, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0) < 1) {
+			sched_yield();
+		}
+	}
+	return 0;
+}
+
+int
+Semaphore::wait ()
+{
+	if (std::atomic_fetch_sub_explicit (&_value, 1, std::memory_order_relaxed) <= 0) {
+		syscall(__NR_futex, &_futex, FUTEX_WAIT_PRIVATE, _futex, NULL, 0, 0);
+	}
+	return 0;
+}
+
+int
+Semaphore::reset ()
+{
+	int value = _value;
+	_value = 0;
+	return value;
 }
 
 #endif

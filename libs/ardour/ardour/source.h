@@ -38,6 +38,7 @@
 #include "ardour/ardour.h"
 #include "ardour/session_object.h"
 #include "ardour/data_type.h"
+#include "ardour/segment_descriptor.h"
 
 namespace ARDOUR {
 
@@ -62,7 +63,8 @@ public:
 		Missing = 0x400, /* used for MIDI only */
 	};
 
-	typedef Glib::Threads::Mutex::Lock Lock;
+	typedef Glib::Threads::RWLock::ReaderLock ReaderLock;
+	typedef Glib::Threads::RWLock::WriterLock WriterLock;
 
 	Source (Session&, DataType type, const std::string& name, Flag flags=Flag(0));
 	Source (Session&, const XMLNode&);
@@ -74,21 +76,22 @@ public:
 	time_t timestamp() const { return _timestamp; }
 	void stamp (time_t when) { _timestamp = when; }
 
-	virtual bool        empty () const = 0;
-	virtual samplecnt_t length (samplepos_t pos) const = 0;
-	virtual void        update_length (samplecnt_t cnt) = 0;
+	virtual timepos_t length() const { return _length; }
+
+	virtual bool        empty () const;
+	virtual void        update_length (timepos_t const & dur) {}
 
 	void                 set_take_id (std::string id) { _take_id =id; }
 	const std::string&   take_id ()        const { return _take_id; }
 
 	void mark_for_remove();
 
-	virtual void mark_streaming_write_started (const Lock& lock) {}
-	virtual void mark_streaming_write_completed (const Lock& lock) = 0;
+	virtual void mark_streaming_write_started (const WriterLock& lock) {}
+	virtual void mark_streaming_write_completed (const WriterLock& lock) = 0;
 
 	virtual void session_saved() {}
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (XMLNode const &, int version);
 
 	bool         writable () const;
@@ -114,24 +117,25 @@ public:
 
 	CueMarkers const & cue_markers() const { return _cue_markers; }
 	bool add_cue_marker (CueMarker const &);
-	bool move_cue_marker (CueMarker const &, samplepos_t source_relative_position);
+	bool move_cue_marker (CueMarker const &, timepos_t const & source_relative_position);
 	bool remove_cue_marker (CueMarker const &);
 	bool rename_cue_marker (CueMarker&, std::string const &);
 	bool clear_cue_markers ();
 	PBD::Signal0<void> CueMarkersChanged;
 
-	virtual samplepos_t natural_position() const { return _natural_position; }
-	virtual void set_natural_position (samplepos_t pos);
+	virtual timepos_t natural_position() const { return _natural_position; }
+	virtual void set_natural_position (timepos_t const & pos);
+
 	bool have_natural_position() const { return _have_natural_position; }
 
 	void set_allow_remove_if_empty (bool yn);
 
-	Glib::Threads::Mutex& mutex() { return _lock; }
+	Glib::Threads::RWLock& mutex() { return _lock; }
 	Flag flags() const { return _flags; }
 
 	virtual void inc_use_count ();
 	virtual void dec_use_count ();
-	int  use_count() const { return g_atomic_int_get (&_use_count); }
+	int  use_count() const { return g_atomic_int_get (const_cast<GATOMIC_QUAL gint*> (&_use_count)); }
 	bool used() const { return use_count() > 0; }
 
 	uint32_t level() const { return _level; }
@@ -142,22 +146,29 @@ public:
 	void set_captured_for (std::string str) { _captured_for = str; }
 	std::string captured_for() const { return _captured_for; }
 
-  protected:
-	DataType          _type;
-	Flag              _flags;
-	time_t            _timestamp;
-	std::string       _take_id;
-	samplepos_t       _natural_position;
-	samplepos_t       _have_natural_position;
-	bool              _analysed;
-	GATOMIC_QUAL gint _use_count; /* atomic */
-	uint32_t          _level; /* how deeply nested is this source w.r.t a disk file */
-	std::string       _ancestor_name;
-	std::string       _captured_for;
-	XrunPositions     _xruns;
-	CueMarkers        _cue_markers;
+	bool get_segment_descriptor (TimelineRange const &, SegmentDescriptor&);
+	int set_segment_descriptor (SegmentDescriptor const &);
 
-	mutable Glib::Threads::Mutex _lock;
+  protected:
+	DataType            _type;
+	Flag                _flags;
+	time_t              _timestamp;
+	std::string         _take_id;
+	timepos_t           _natural_position;
+	bool                _have_natural_position;
+	bool                _analysed;
+	GATOMIC_QUAL gint _use_count; /* atomic */
+	uint32_t            _level; /* how deeply nested is this source w.r.t a disk file */
+	std::string         _ancestor_name;
+	std::string        _captured_for;
+	timepos_t          _length;
+	XrunPositions      _xruns;
+	CueMarkers         _cue_markers;
+
+	typedef std::vector<SegmentDescriptor> SegmentDescriptors;
+	SegmentDescriptors segment_descriptors;
+
+	mutable Glib::Threads::RWLock _lock;
 	mutable Glib::Threads::Mutex _analysis_lock;
 
   private:

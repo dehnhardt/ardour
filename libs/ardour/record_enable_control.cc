@@ -24,9 +24,9 @@
 using namespace ARDOUR;
 using namespace PBD;
 
-RecordEnableControl::RecordEnableControl (Session& session, std::string const & name, Recordable& r)
+RecordEnableControl::RecordEnableControl (Session& session, std::string const & name, Recordable& r, Temporal::TimeDomain td)
 	: SlavableAutomationControl (session, RecEnableAutomation, ParameterDescriptor (RecEnableAutomation),
-	                             boost::shared_ptr<AutomationList>(new AutomationList(Evoral::Parameter(RecEnableAutomation))),
+	                             boost::shared_ptr<AutomationList>(new AutomationList(Evoral::Parameter(RecEnableAutomation), td)),
 	                             name)
 	, _recordable (r)
 {

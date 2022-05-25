@@ -283,7 +283,7 @@ TransportMastersWidget::idle_remove (TransportMastersWidget::Row* row)
 void
 TransportMastersWidget::update_ports ()
 {
-	if (!is_mapped()) {
+	if (!get_mapped ()) {
 		return;
 	}
 
@@ -668,7 +668,7 @@ TransportMastersWidget::Row::update (Session* s, samplepos_t now)
 }
 
 void
-TransportMastersWidget::update (samplepos_t /* audible */)
+TransportMastersWidget::update (timepos_t /* audible */)
 {
 	samplepos_t now = AudioEngine::instance()->sample_time ();
 

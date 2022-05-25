@@ -31,6 +31,8 @@
 #include "pbd/file_utils.h"
 #include "pbd/replace_all.h"
 
+#include "temporal/types_convert.h"
+
 #include "ardour/audioengine.h"
 #include "ardour/disk_reader.h"
 #include "ardour/disk_writer.h"
@@ -187,7 +189,7 @@ RCConfiguration::instant_xml(const string& node_name)
 
 
 XMLNode&
-RCConfiguration::get_state ()
+RCConfiguration::get_state () const
 {
 	XMLNode* root;
 
@@ -211,7 +213,7 @@ RCConfiguration::get_state ()
 }
 
 XMLNode&
-RCConfiguration::get_variables ()
+RCConfiguration::get_variables () const
 {
 	XMLNode* node;
 

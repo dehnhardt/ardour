@@ -876,7 +876,7 @@ Editor::canvas_region_view_name_highlight_event (GdkEvent* event, ArdourCanvas::
 		break;
 	case GDK_MOTION_NOTIFY:
 		motion_handler (item, event);
-		ret = true; // force this to avoid progagating the event into the regionview
+		ret = true; // force this to avoid propagating the event into the regionview
 		break;
 	case GDK_ENTER_NOTIFY:
 		ret = enter_handler (item, event, RegionViewNameHighlight);
@@ -981,25 +981,106 @@ Editor::canvas_marker_event (GdkEvent *event, ArdourCanvas::Item* item, ArdourMa
 bool
 Editor::canvas_marker_bar_event (GdkEvent *event, ArdourCanvas::Item* item)
 {
+	switch (event->type) {
+		case GDK_ENTER_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				marker_bar->set_fill_color (Gtkmm2ext::HSV(UIConfiguration::instance().color_mod ("range marker bar", "marker bar")).lighter(0.20).color());
+			}
+			break;
+		case GDK_LEAVE_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				marker_bar->set_fill_color (UIConfiguration::instance().color_mod ("range marker bar", "marker bar"));
+			}
+			break;
+		default:
+			break;
+	};
+
 	return typed_event (item, event, MarkerBarItem);
 }
 
 bool
 Editor::canvas_range_marker_bar_event (GdkEvent *event, ArdourCanvas::Item* item)
 {
+	switch (event->type) {
+		case GDK_ENTER_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				range_marker_bar->set_fill_color (Gtkmm2ext::HSV(UIConfiguration::instance().color_mod ("range marker bar", "marker bar")).lighter(0.20).color());
+			}
+			break;
+		case GDK_LEAVE_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				range_marker_bar->set_fill_color (UIConfiguration::instance().color_mod ("range marker bar", "marker bar"));
+			}
+			break;
+		default:
+			break;
+	};
+
 	return typed_event (item, event, RangeMarkerBarItem);
 }
 
 bool
 Editor::canvas_transport_marker_bar_event (GdkEvent *event, ArdourCanvas::Item* item)
 {
+	switch (event->type) {
+		case GDK_ENTER_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				transport_marker_bar->set_fill_color (Gtkmm2ext::HSV(UIConfiguration::instance().color_mod ("range marker bar", "marker bar")).lighter(0.20).color());
+			}
+			break;
+		case GDK_LEAVE_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				transport_marker_bar->set_fill_color (UIConfiguration::instance().color_mod ("range marker bar", "marker bar"));
+			}
+			break;
+		default:
+			break;
+	};
+
 	return typed_event (item, event, TransportMarkerBarItem);
 }
 
 bool
 Editor::canvas_cd_marker_bar_event (GdkEvent *event, ArdourCanvas::Item* item)
 {
+	switch (event->type) {
+		case GDK_ENTER_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				cd_marker_bar->set_fill_color (Gtkmm2ext::HSV(UIConfiguration::instance().color_mod ("range marker bar", "marker bar")).lighter(0.20).color());
+			}
+			break;
+		case GDK_LEAVE_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				cd_marker_bar->set_fill_color (UIConfiguration::instance().color_mod ("range marker bar", "marker bar"));
+			}
+			break;
+		default:
+			break;
+	};
+
 	return typed_event (item, event, CdMarkerBarItem);
+}
+
+bool
+Editor::canvas_cue_marker_bar_event (GdkEvent *event, ArdourCanvas::Item* item)
+{
+	switch (event->type) {
+		case GDK_ENTER_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				cue_marker_bar->set_fill_color (Gtkmm2ext::HSV(UIConfiguration::instance().color_mod ("range marker bar", "marker bar")).lighter(0.20).color());
+			}
+			break;
+		case GDK_LEAVE_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				cue_marker_bar->set_fill_color (UIConfiguration::instance().color_mod ("range marker bar", "marker bar"));
+			}
+			break;
+		default:
+			break;
+	};
+
+	return typed_event (item, event, CueMarkerBarItem);
 }
 
 bool
@@ -1024,6 +1105,12 @@ bool
 Editor::canvas_meter_marker_event (GdkEvent *event, ArdourCanvas::Item* item, MeterMarker* /*marker*/)
 {
 	return typed_event (item, event, MeterMarkerItem);
+}
+
+bool
+Editor::canvas_bbt_marker_event (GdkEvent *event, ArdourCanvas::Item* item, BBTMarker* /*marker*/)
+{
+	return typed_event (item, event, BBTMarkerItem);
 }
 
 bool
@@ -1087,12 +1174,42 @@ Editor::canvas_ruler_event (GdkEvent *event, ArdourCanvas::Item* item, ItemType 
 bool
 Editor::canvas_tempo_bar_event (GdkEvent *event, ArdourCanvas::Item* item)
 {
+	switch (event->type) {
+		case GDK_ENTER_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				tempo_bar->set_fill_color (Gtkmm2ext::HSV(UIConfiguration::instance().color_mod ("tempo bar", "marker bar")).lighter(0.20).color());
+			}
+			break;
+		case GDK_LEAVE_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				tempo_bar->set_fill_color (UIConfiguration::instance().color_mod ("tempo bar", "marker bar"));
+			}
+			break;
+		default:
+			break;
+	};
+
 	return typed_event (item, event, TempoBarItem);
 }
 
 bool
 Editor::canvas_meter_bar_event (GdkEvent *event, ArdourCanvas::Item* item)
 {
+	switch (event->type) {
+		case GDK_ENTER_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				meter_bar->set_fill_color (Gtkmm2ext::HSV(UIConfiguration::instance().color_mod ("meter bar", "marker bar")).lighter(0.20).color());
+			}
+			break;
+		case GDK_LEAVE_NOTIFY:
+			if (event->crossing.detail != GDK_NOTIFY_INFERIOR) {
+				meter_bar->set_fill_color (UIConfiguration::instance().color_mod ("meter bar", "marker bar"));
+			}
+			break;
+		default:
+			break;
+	};
+
 	return typed_event (item, event, MeterBarItem);
 }
 
@@ -1198,35 +1315,17 @@ Editor::track_canvas_drag_motion (Glib::RefPtr<Gdk::DragContext> const& context,
 
 	if (can_drop) {
 
-		if (target == X_("regions")) {
-			region = _regions->get_dragged_region ();
-		}
-
-		if (region) {
-
-			if (tv.first == 0
-			    && (
-				boost::dynamic_pointer_cast<AudioRegion> (region) != 0 ||
-				boost::dynamic_pointer_cast<MidiRegion> (region) != 0
-			       )
-			   )
-			{
+		if (target == "x-ardour/region.pbdid") {
+			if (tv.first == 0 && pbdid_dragged_dt != DataType::NIL) {
 				/* drop to drop-zone */
-				context->drag_status (context->get_suggested_action(), time);
+				context->drag_status (Gdk::ACTION_COPY, time);
 				return true;
 			}
 
-			if ((boost::dynamic_pointer_cast<AudioRegion> (region) != 0 &&
-			     dynamic_cast<AudioTimeAxisView*> (tv.first) != 0) ||
-			    (boost::dynamic_pointer_cast<MidiRegion> (region) != 0 &&
-			     dynamic_cast<MidiTimeAxisView*> (tv.first) != 0)) {
-
-				/* audio to audio
-				   OR
-				   midi to midi
-				*/
-
-				context->drag_status (context->get_suggested_action(), time);
+			if ((pbdid_dragged_dt == DataType::AUDIO && dynamic_cast<AudioTimeAxisView*> (tv.first) != 0) ||
+			    (pbdid_dragged_dt == DataType::MIDI  && dynamic_cast<MidiTimeAxisView*> (tv.first) != 0)) {
+				/* audio to audio OR MIDI to MIDI */
+				context->drag_status (Gdk::ACTION_COPY, time);
 				return true;
 			}
 		} else {
@@ -1256,9 +1355,8 @@ Editor::track_canvas_drag_motion (Glib::RefPtr<Gdk::DragContext> const& context,
 void
 Editor::drop_regions (const Glib::RefPtr<Gdk::DragContext>& /*context*/,
                       int x, int y,
-                      const SelectionData& /*data*/,
-                      guint /*info*/, guint /*time*/,
-                      bool from_region_list)
+                      const SelectionData& data,
+                      guint /*info*/, guint /*time*/)
 {
 	GdkEvent event;
 	double px;
@@ -1271,13 +1369,8 @@ Editor::drop_regions (const Glib::RefPtr<Gdk::DragContext>& /*context*/,
 	event.motion.state = Gdk::BUTTON1_MASK;
 	samplepos_t const pos = window_event_sample (&event, &px, &py);
 
-	boost::shared_ptr<Region> region;
-
-	if (from_region_list) {
-		region = _regions->get_dragged_region ();
-	} else {
-		region = _sources->get_dragged_region ();
-	}
+	PBD::ID rid (data.get_data_as_string ());
+	boost::shared_ptr<Region> region = RegionFactory::region_by_id (rid);
 
 	if (!region) { return; }
 
@@ -1289,12 +1382,12 @@ Editor::drop_regions (const Glib::RefPtr<Gdk::DragContext>& /*context*/,
 	} else {
 		try {
 			if (boost::dynamic_pointer_cast<AudioRegion> (region)) {
-				uint32_t output_chan = region->n_channels();
+				uint32_t output_chan = region->sources().size();
 				if ((Config->get_output_auto_connect() & AutoConnectMaster) && session()->master_out()) {
 					output_chan =  session()->master_out()->n_inputs().n_audio();
 				}
 				list<boost::shared_ptr<AudioTrack> > audio_tracks;
-				audio_tracks = session()->new_audio_track (region->n_channels(), output_chan, 0, 1, region->name(), PresentationInfo::max_order);
+				audio_tracks = session()->new_audio_track (region->sources().size(), output_chan, 0, 1, region->name(), PresentationInfo::max_order);
 				rtav = dynamic_cast<RouteTimeAxisView*> (time_axis_view_from_stripable (audio_tracks.front()));
 			} else if (boost::dynamic_pointer_cast<MidiRegion> (region)) {
 				ChanCount one_midi_port (DataType::MIDI, 1);
@@ -1303,7 +1396,7 @@ Editor::drop_regions (const Glib::RefPtr<Gdk::DragContext>& /*context*/,
 				                                         Config->get_strict_io () || Profile->get_mixbus (),
 				                                         boost::shared_ptr<ARDOUR::PluginInfo>(),
 				                                         (ARDOUR::Plugin::PresetRecord*) 0,
-				                                         (ARDOUR::RouteGroup*) 0, 1, region->name(), PresentationInfo::max_order);
+				                                         (ARDOUR::RouteGroup*) 0, 1, region->name(), PresentationInfo::max_order, Normal, true);
 				rtav = dynamic_cast<RouteTimeAxisView*> (time_axis_view_from_stripable (midi_tracks.front()));
 			} else {
 				return;
@@ -1319,7 +1412,7 @@ Editor::drop_regions (const Glib::RefPtr<Gdk::DragContext>& /*context*/,
 
 		if ((boost::dynamic_pointer_cast<AudioRegion> (region_copy) != 0 && dynamic_cast<AudioTimeAxisView*> (rtav) != 0) ||
 		    (boost::dynamic_pointer_cast<MidiRegion> (region_copy) != 0 && dynamic_cast<MidiTimeAxisView*> (rtav) != 0)) {
-			_drags->set (new RegionInsertDrag (this, region_copy, rtav, pos), &event);
+			_drags->set (new RegionInsertDrag (this, region_copy, rtav, timepos_t (pos)), &event);
 			_drags->end_grab (&event);
 		}
 	}

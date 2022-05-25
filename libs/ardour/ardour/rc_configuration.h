@@ -24,6 +24,8 @@
 #include <map>
 #include <string>
 
+#include "temporal/types.h"
+
 #include "ardour/libardour_visibility.h"
 #include "ardour/types.h"
 #include "ardour/utils.h"
@@ -43,8 +45,8 @@ class LIBARDOUR_API RCConfiguration : public PBD::Configuration
 
 	void map_parameters (boost::function<void (std::string)>&);
 	int set_state (XMLNode const &, int version);
-	XMLNode& get_state ();
-	XMLNode& get_variables ();
+	XMLNode& get_state () const;
+	XMLNode& get_variables () const;
 	void set_variables (XMLNode const &);
 
 	int load_state ();

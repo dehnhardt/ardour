@@ -45,7 +45,7 @@ public:
 
 	int set_active (bool yn);
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	void start_wiimote_discovery ();
@@ -54,6 +54,8 @@ public:
 	void wiimote_callback (int mesg_count, union cwiid_mesg mesg[]);
 
 	void stripable_selection_changed () {}
+
+	CONTROL_PROTOCOL_THREADS_NEED_TEMPO_MAP_DECL();
 
 protected:
 	void do_request (WiimoteControlUIRequest*);

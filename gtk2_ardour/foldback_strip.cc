@@ -405,7 +405,7 @@ FoldbackStrip::init ()
 	_name_button.set_text_ellipsize (Pango::ELLIPSIZE_END);
 	_name_button.set_layout_ellipsize_width (PX_SCALE (_width) * PANGO_SCALE);
 
-	_send_display.set_flags (CAN_FOCUS);
+	_send_display.set_can_focus ();
 	_send_display.set_spacing (4);
 
 	_send_scroller.set_policy (Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
@@ -523,7 +523,7 @@ FoldbackStrip::init ()
 	            Gdk::KEY_PRESS_MASK |
 	            Gdk::KEY_RELEASE_MASK);
 
-	set_flags (get_flags () | Gtk::CAN_FOCUS);
+	set_can_focus ();
 
 	signal_enter_notify_event ().connect (sigc::mem_fun (*this, &FoldbackStrip::fb_strip_enter_event));
 
@@ -656,13 +656,8 @@ FoldbackStrip::update_send_box ()
 	StripableList stripables;
 	stripables.clear ();
 
-	Route::FedBy fed_by = _route->fed_by ();
-	for (Route::FedBy::iterator i = fed_by.begin (); i != fed_by.end (); ++i) {
-		if (i->sends_only) {
-			boost::shared_ptr<Route>     rt (i->r.lock ());
-			boost::shared_ptr<Stripable> s = boost::dynamic_pointer_cast<Stripable> (rt);
-			stripables.push_back (s);
-		}
+	for (auto const& s : _route->signal_sources (true)) {
+		stripables.push_back (s);
 	}
 	stripables.sort (StripableByPresentationOrder ());
 	for (StripableList::iterator it = stripables.begin (); it != stripables.end (); ++it) {
@@ -1076,19 +1071,15 @@ FoldbackStrip::duplicate_current_fb ()
 		double oldgain = old_fb->gain_control ()->get_value ();
 		new_fb->gain_control ()->set_value (oldgain * 0.25, PBD::Controllable::NoGroup);
 
-		Route::FedBy fed_by = old_fb->fed_by ();
-		for (Route::FedBy::iterator i = fed_by.begin (); i != fed_by.end (); ++i) {
-			if (i->sends_only) {
-				boost::shared_ptr<Route>     rt (i->r.lock ());
-				boost::shared_ptr<Send>      old_snd  = rt->internal_send_for (old_fb);
-				boost::shared_ptr<Processor> old_proc = old_snd;
-				bool                         old_pre  = old_proc->get_pre_fader ();
-				rt->add_foldback_send (new_fb, !old_pre);
-				if (old_snd) {
-					float                   old_gain = old_snd->gain_control ()->get_value ();
-					boost::shared_ptr<Send> new_snd  = rt->internal_send_for (new_fb);
-					new_snd->gain_control ()->set_value (old_gain, PBD::Controllable::NoGroup);
-				}
+		for (auto const& rt : old_fb->signal_sources (true)) {
+			boost::shared_ptr<Send>      old_snd  = rt->internal_send_for (old_fb);
+			boost::shared_ptr<Processor> old_proc = old_snd;
+			bool                         old_pre  = old_proc->get_pre_fader ();
+			rt->add_foldback_send (new_fb, !old_pre);
+			if (old_snd) {
+				float                   old_gain = old_snd->gain_control ()->get_value ();
+				boost::shared_ptr<Send> new_snd  = rt->internal_send_for (new_fb);
+				new_snd->gain_control ()->set_value (old_gain, PBD::Controllable::NoGroup);
 			}
 		}
 		set_route (new_fb);

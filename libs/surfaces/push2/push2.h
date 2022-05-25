@@ -312,7 +312,7 @@ class Push2 : public ARDOUR::ControlProtocol
 	void  tear_down_gui ();
 
 	int set_active (bool yn);
-	XMLNode& get_state();
+	XMLNode& get_state() const;
 	int set_state (const XMLNode & node, int version);
 
 	PBD::Signal0<void> ConnectionChange;
@@ -361,6 +361,8 @@ class Push2 : public ARDOUR::ControlProtocol
 	PBD::Signal1<void,PressureMode> PressureModeChange;
 
 	libusb_device_handle* usb_handle() const { return handle; }
+
+	CONTROL_PROTOCOL_THREADS_NEED_TEMPO_MAP_DECL();
 
   private:
 	libusb_device_handle *handle;

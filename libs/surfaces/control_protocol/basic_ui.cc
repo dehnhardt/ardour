@@ -26,6 +26,8 @@
 #include "pbd/pthread_utils.h"
 #include "pbd/memento_command.h"
 
+#include "temporal/tempo.h"
+
 #include "ardour/session.h"
 #include "ardour/location.h"
 #include "ardour/tempo.h"
@@ -37,6 +39,7 @@
 #include "pbd/i18n.h"
 
 using namespace ARDOUR;
+using namespace Temporal;
 
 PBD::Signal2<void,std::string,std::string> BasicUI::AccessAction;
 
@@ -113,7 +116,7 @@ BasicUI::loop_toggle ()
 }
 
 void
-BasicUI::loop_location (samplepos_t start, samplepos_t end)
+BasicUI::loop_location (timepos_t const & start, timepos_t const & end)
 {
 	Location* tll;
 	if ((tll = session->locations()->auto_loop_location()) == 0) {
@@ -147,7 +150,7 @@ BasicUI::goto_end ()
 void
 BasicUI::add_marker (const std::string& markername)
 {
-	samplepos_t where = session->audible_sample();
+	timepos_t where (session->audible_sample());
 	Location *location = new Location (*session, where, where, markername, Location::IsMark);
 	session->begin_reversible_command (_("add marker"));
 	XMLNode &before = session->locations()->get_state();
@@ -167,7 +170,7 @@ BasicUI::remove_marker_at_playhead ()
 
 		//find location(s) at this time
 		Locations::LocationList locs;
-		session->locations()->find_all_between (session->audible_sample(), session->audible_sample()+1, locs, Location::Flags(0));
+		session->locations()->find_all_between (timepos_t (session->audible_sample()), timepos_t (session->audible_sample()+1), locs, Location::Flags(0));
 		for (Locations::LocationList::iterator i = locs.begin(); i != locs.end(); ++i) {
 			if ((*i)->is_mark()) {
 				session->locations()->remove (*i);
@@ -420,10 +423,10 @@ BasicUI::save_state ()
 void
 BasicUI::prev_marker ()
 {
-	samplepos_t pos = session->locations()->first_mark_before (session->transport_sample());
+	timepos_t pos = session->locations()->first_mark_before (timepos_t (session->transport_sample()));
 
 	if (pos >= 0) {
-		session->request_locate (pos);
+		session->request_locate (pos.samples());
 	} else {
 		session->goto_start ();
 	}
@@ -432,10 +435,10 @@ BasicUI::prev_marker ()
 void
 BasicUI::next_marker ()
 {
-	samplepos_t pos = session->locations()->first_mark_after (session->transport_sample());
+	timepos_t pos = session->locations()->first_mark_after (timepos_t (session->transport_sample()));
 
 	if (pos >= 0) {
-		session->request_locate (pos);
+		session->request_locate (pos.samples());
 	} else {
 		session->goto_end();
 	}
@@ -543,32 +546,28 @@ BasicUI::jump_by_seconds (double secs, LocateTransportDisposition ltd)
 }
 
 void
-BasicUI::jump_by_bars (double bars, LocateTransportDisposition ltd)
+BasicUI::jump_by_bars (int bars, LocateTransportDisposition ltd)
 {
-	TempoMap& tmap (session->tempo_map());
-	Timecode::BBT_Time bbt (tmap.bbt_at_sample (session->transport_sample()));
+	TempoMap::SharedPtr tmap (TempoMap::fetch());
+	Temporal::BBT_Time bbt (tmap->bbt_at (timepos_t (session->transport_sample())));
 
-	bars += bbt.bars;
-	if (bars < 0) {
-		bars = 0;
+	bbt.bars += bbt.bars;
+	if (bbt.bars < 0) {
+		bbt.bars = 1;
 	}
 
-	AnyTime any;
-	any.type = AnyTime::BBT;
-	any.bbt.bars = bars;
-
-	session->request_locate (session->convert_to_samples (any), ltd);
+	session->request_locate (tmap->sample_at (bbt), ltd);
 }
 
 void
-BasicUI::jump_by_beats (double beats, LocateTransportDisposition ltd)
+BasicUI::jump_by_beats (int beats, LocateTransportDisposition ltd)
 {
-	TempoMap& tmap (session->tempo_map ());
-	double qn_goal = tmap.quarter_note_at_sample (session->transport_sample ()) + beats;
-	if (qn_goal < 0.0) {
-		qn_goal = 0.0;
+	Beats qn_goal = timepos_t (session->transport_sample ()).beats() + Beats (beats, 0);
+
+	if (qn_goal < Beats()) {
+		qn_goal = Beats();
 	}
-	session->request_locate (tmap.sample_at_quarter_note (qn_goal), ltd);
+	session->request_locate (timepos_t (qn_goal).samples());
 }
 
 void
@@ -624,7 +623,7 @@ BasicUI::toggle_click ()
 }
 
 void
-BasicUI::toggle_roll (bool roll_out_of_bounded_mode)
+BasicUI::toggle_roll (bool with_abort, bool roll_out_of_bounded_mode)
 {
 	/* TO BE KEPT IN SYNC WITH ARDOUR_UI::toggle_roll() */
 
@@ -673,13 +672,13 @@ BasicUI::toggle_roll (bool roll_out_of_bounded_mode)
 			}
 
 		} else {
-			session->request_stop (true, true);
+			session->request_stop (with_abort, true);
 		}
 
 	} else { /* not rolling */
 
 		if (session->get_play_loop() && Config->get_loop_is_mode()) {
-			session->request_locate (session->locations()->auto_loop_location()->start(), MustRoll);
+			session->request_locate (session->locations()->auto_loop_location()->start().samples(), MustRoll);
 		} else {
 			session->request_roll (TRS_UI);
 		}
@@ -794,7 +793,7 @@ BasicUI::goto_nth_marker (int n)
 	for (Locations::LocationList::iterator i = ordered.begin(); n >= 0 && i != ordered.end(); ++i) {
 		if ((*i)->is_mark() && !(*i)->is_hidden() && !(*i)->is_session_range()) {
 			if (n == 0) {
-				session->request_locate ((*i)->start());
+				session->request_locate ((*i)->start().samples());
 				break;
 			}
 			--n;

@@ -21,6 +21,10 @@
 
 #include "pbd/convert.h"
 #include "pbd/error.h"
+#include "pbd/pthread_utils.h"
+
+#include "temporal/superclock.h"
+#include "temporal/tempo.h"
 
 #include "ardour/control_protocol_manager.h"
 #include "ardour/gain_control.h"
@@ -62,6 +66,7 @@ const std::string ControlProtocol::state_node_name ("Protocol");
 ControlProtocol::ControlProtocol (Session& s, string str)
 	: BasicUI (s)
 	, _name (str)
+	, glib_event_callback (boost::bind (&ControlProtocol::event_loop_precall, this))
 	, _active (false)
 {
 	if (!selection_connected) {
@@ -73,6 +78,19 @@ ControlProtocol::ControlProtocol (Session& s, string str)
 
 ControlProtocol::~ControlProtocol ()
 {
+}
+
+void
+ControlProtocol::event_loop_precall ()
+{
+	/* reload the thread-local ptr to the tempo map */
+	Temporal::TempoMap::fetch ();
+}
+
+void
+ControlProtocol::install_precall_handler (Glib::RefPtr<Glib::MainContext> context)
+{
+	glib_event_callback.attach (context);
 }
 
 int
@@ -314,7 +332,7 @@ ControlProtocol::bundles ()
 }
 
 XMLNode&
-ControlProtocol::get_state ()
+ControlProtocol::get_state () const
 {
 	XMLNode* node = new XMLNode (state_node_name);
 
@@ -376,3 +394,4 @@ ControlProtocol::notify_stripable_selection_changed (StripableNotificationListPt
 {
 	_last_selected = *sp;
 }
+

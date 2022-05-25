@@ -68,7 +68,7 @@ public:
 	                  bool                         include_endpoint,
 	                  bool                         for_export,
 	                  bool                         for_freeze,
-	                  MidiStateTracker&            tracker);
+	                  MidiNoteTracker&            tracker);
 
 	int set_state (const XMLNode&, int version);
 
@@ -146,7 +146,7 @@ public:
 
 protected:
 
-	XMLNode& state (bool save_template);
+	XMLNode& state (bool save_template) const;
 
 	void act_on_mute ();
 	void monitoring_changed (bool, PBD::Controllable::GroupControlDisposition);

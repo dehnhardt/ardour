@@ -73,6 +73,7 @@
 #include "editor_items.h"
 #include "region_selection.h"
 #include "selection_memento.h"
+#include "trigger_clip_picker.h"
 #include "tempo_curve.h"
 
 #include "ptformat/ptformat.h"
@@ -99,7 +100,6 @@ namespace ARDOUR {
 	class Region;
 	class RouteGroup;
 	class Session;
-	class TempoSection;
 	class Track;
 }
 
@@ -143,10 +143,10 @@ class RegionPeakCursor;
 class RhythmFerret;
 class RulerDialog;
 class Selection;
+class SelectionPropertiesBox;
 class SoundFileOmega;
 class StreamView;
 class GridLines;
-class TempoLines;
 class TimeAxisView;
 class TimeInfoBox;
 class TimeFXDialog;
@@ -169,6 +169,8 @@ public:
 
 	bool pending_locate_request() const { return _pending_locate_request; }
 
+	Temporal::TimeDomain default_time_domain() const;
+
 	samplepos_t leftmost_sample() const { return _leftmost_sample; }
 
 	samplecnt_t current_page_samples() const {
@@ -186,15 +188,25 @@ public:
 	void set_grid_to (Editing::GridType);
 	void set_snap_mode (Editing::SnapMode);
 
+	void set_draw_length_to (Editing::GridType);
+	void set_draw_velocity_to (int);
+	void set_draw_channel_to (int);
+
 	Editing::SnapMode  snap_mode () const;
 	Editing::GridType  grid_type () const;
 	bool  grid_type_is_musical (Editing::GridType) const;
 	bool  grid_musical () const;
 
+	bool on_velocity_scroll_event (GdkEventScroll*);
+
+	Editing::GridType  draw_length () const;
+	int                draw_velocity () const;
+	int                draw_channel () const;
+
 	void undo (uint32_t n = 1);
 	void redo (uint32_t n = 1);
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	void set_mouse_mode (Editing::MouseMode, bool force = false);
@@ -262,11 +274,19 @@ public:
 		return sample / (double) samples_per_pixel;
 	}
 
+	double time_to_pixel (Temporal::timepos_t const & pos) const;
+	double time_to_pixel_unrounded (Temporal::timepos_t const & pos) const;
+
+	double duration_to_pixels (Temporal::timecnt_t const & pos) const;
+	double duration_to_pixels_unrounded (Temporal::timecnt_t const & pos) const;
+
 	/* selection */
 
 	Selection& get_selection() const { return *selection; }
-	bool get_selection_extents (samplepos_t &start, samplepos_t &end) const;  // the time extents of the current selection, whether Range, Region(s), Control Points, or Notes
+	bool get_selection_extents (Temporal::timepos_t &start, Temporal::timepos_t &end) const;  // the time extents of the current selection, whether Range, Region(s), Control Points, or Notes
 	Selection& get_cut_buffer() const { return *cut_buffer; }
+
+	void get_regionviews_at_or_after (Temporal::timepos_t const &, RegionSelection&);
 
 	void set_selection (std::list<Selectable*>, Selection::Operation);
 	void set_selected_midi_region_view (MidiRegionView&);
@@ -283,7 +303,7 @@ public:
 	void invert_selection_in_track ();
 	void invert_selection ();
 	void deselect_all ();
-	long select_range (samplepos_t, samplepos_t);
+	long select_range (Temporal::timepos_t const & , Temporal::timepos_t const &);
 
 	void set_selected_regionview_from_region_list (boost::shared_ptr<ARDOUR::Region> region, Selection::Operation op = Selection::Set);
 
@@ -337,7 +357,7 @@ public:
 	void get_onscreen_tracks (TrackViewList&);
 
 	Width editor_mixer_strip_width;
-	void maybe_add_mixer_strip_width (XMLNode&);
+	void maybe_add_mixer_strip_width (XMLNode&) const;
 	void show_editor_mixer (bool yn);
 	void create_editor_mixer ();
 	void show_editor_list (bool yn);
@@ -345,16 +365,18 @@ public:
 	void mixer_strip_width_changed ();
 	void hide_track_in_display (TimeAxisView* tv, bool apply_to_selection = false);
 	void show_track_in_display (TimeAxisView* tv, bool move_into_view = false);
-	void tempo_curve_selected (ARDOUR::TempoSection* ts, bool yn);
+	void tempo_curve_selected (Temporal::TempoPoint const * ts, bool yn);
 
 	/* nudge is initiated by transport controls owned by ARDOUR_UI */
 
-	samplecnt_t get_nudge_distance (samplepos_t pos, samplecnt_t& next);
-	samplecnt_t get_paste_offset (samplepos_t pos, unsigned paste_count, samplecnt_t duration);
-	unsigned get_grid_beat_divisions(samplepos_t position);
-	Temporal::Beats get_grid_type_as_beats (bool& success, samplepos_t position);
+	Temporal::timecnt_t get_nudge_distance (Temporal::timepos_t const & pos, Temporal::timecnt_t& next);
+	Temporal::timecnt_t get_paste_offset (Temporal::timepos_t const & pos, unsigned paste_count, Temporal::timecnt_t const & duration);
 
-	int32_t get_grid_music_divisions (uint32_t event_state);
+	Temporal::Beats get_grid_type_as_beats (bool& success, Temporal::timepos_t const & position);
+	Temporal::Beats get_draw_length_as_beats (bool& success, Temporal::timepos_t const & position);
+
+	int32_t get_grid_beat_divisions (Editing::GridType gt);
+	int32_t get_grid_music_divisions (Editing::GridType gt, uint32_t event_state);
 
 	void nudge_forward (bool next, bool force_playhead);
 	void nudge_backward (bool next, bool force_playhead);
@@ -382,7 +404,7 @@ public:
 	void set_group_tabs ();
 
 	/* returns the left-most and right-most time that the gui should allow the user to scroll to */
-	std::pair <samplepos_t,samplepos_t> session_gui_extents (bool use_extra = true) const;
+	std::pair <Temporal::timepos_t,Temporal::timepos_t> session_gui_extents (bool use_extra = true) const;
 
 	/* RTAV Automation display option */
 	bool show_touched_automation () const;
@@ -425,12 +447,9 @@ public:
 	void reset_zoom (samplecnt_t);
 	void reposition_and_zoom (samplepos_t, double);
 
-	samplepos_t get_preferred_edit_position (Editing::EditIgnoreOption = Editing::EDIT_IGNORE_NONE,
-	                                         bool use_context_click = false,
-	                                         bool from_outside_canvas = false);
-
-	bool update_mouse_speed ();
-	bool decelerate_mouse_speed ();
+	Temporal::timepos_t get_preferred_edit_position (Editing::EditIgnoreOption = Editing::EDIT_IGNORE_NONE,
+	                                                 bool use_context_click = false,
+	                                                 bool from_outside_canvas = false);
 
 	void toggle_meter_updating();
 
@@ -439,15 +458,9 @@ public:
 	void goto_visual_state (uint32_t);
 	void save_visual_state (uint32_t);
 
-	void queue_draw_resize_line (int at);
-	void start_resize_line_ops ();
-	void end_resize_line_ops ();
-
 	TrackViewList const & get_track_views () const {
 		return track_views;
 	}
-
-	void do_ptimport(std::string path, ARDOUR::SrcQuality quality);
 
 	void do_import (std::vector<std::string>              paths,
 	                Editing::ImportDisposition            disposition,
@@ -455,15 +468,14 @@ public:
 	                ARDOUR::SrcQuality                    quality,
 	                ARDOUR::MidiTrackNameSource           mts,
 	                ARDOUR::MidiTempoMapDisposition       mtd,
-	                samplepos_t&                          pos,
+	                Temporal::timepos_t&                  pos,
 	                boost::shared_ptr<ARDOUR::PluginInfo> instrument = boost::shared_ptr<ARDOUR::PluginInfo>(),
-	                bool with_markers = false
-		);
+	                bool with_markers = false);
 
 	void do_embed (std::vector<std::string>              paths,
 	               Editing::ImportDisposition            disposition,
 	               Editing::ImportMode                   mode,
-	               samplepos_t&                          pos,
+	               Temporal::timepos_t&                  pos,
 	               boost::shared_ptr<ARDOUR::PluginInfo> instrument = boost::shared_ptr<ARDOUR::PluginInfo>());
 
 	void get_regionview_corresponding_to (boost::shared_ptr<ARDOUR::Region> region, std::vector<RegionView*>& regions);
@@ -475,17 +487,20 @@ public:
 
 	TrackViewList axis_views_from_routes (boost::shared_ptr<ARDOUR::RouteList>) const;
 
-	void snap_to (ARDOUR::MusicSample& first,
-	              ARDOUR::RoundMode    direction = ARDOUR::RoundNearest,
+	void snap_to (Temporal::timepos_t & first,
+	              Temporal::RoundMode    direction = Temporal::RoundNearest,
 	              ARDOUR::SnapPref     pref = ARDOUR::SnapToAny_Visual,
 	              bool                 ensure_snap = false);
 
-	void snap_to_with_modifier (ARDOUR::MusicSample& first,
+	void snap_to_with_modifier (Temporal::timepos_t & first,
 	                            GdkEvent const*      ev,
-	                            ARDOUR::RoundMode    direction = ARDOUR::RoundNearest,
-	                            ARDOUR::SnapPref     pref = ARDOUR::SnapToAny_Visual);
+	                            Temporal::RoundMode    direction = Temporal::RoundNearest,
+	                            ARDOUR::SnapPref     gpref = ARDOUR::SnapToAny_Visual);
+	Temporal::timepos_t snap_to_bbt (Temporal::timepos_t const & start,
+	                                 Temporal::RoundMode   direction,
+	                                 ARDOUR::SnapPref    gpref);
 
-	void set_snapped_cursor_position (samplepos_t pos);
+	void set_snapped_cursor_position (Temporal::timepos_t const & pos);
 
 	void begin_selection_op_history ();
 	void begin_reversible_selection_op (std::string cmd_name);
@@ -563,25 +578,33 @@ public:
 
 	/* Ruler metrics methods */
 
-	void metric_get_timecode (std::vector<ArdourCanvas::Ruler::Mark>&, gdouble, gdouble, gint);
-	void metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>&, gdouble, gdouble, gint);
-	void metric_get_samples (std::vector<ArdourCanvas::Ruler::Mark>&, gdouble, gdouble, gint);
-	void metric_get_minsec (std::vector<ArdourCanvas::Ruler::Mark>&, gdouble, gdouble, gint);
+	void metric_get_timecode (std::vector<ArdourCanvas::Ruler::Mark>&, int64_t, int64_t, gint);
+	void metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>&, int64_t, int64_t, gint);
+	void metric_get_samples (std::vector<ArdourCanvas::Ruler::Mark>&, int64_t, int64_t, gint);
+	void metric_get_minsec (std::vector<ArdourCanvas::Ruler::Mark>&, int64_t, int64_t, gint);
 
 	/* editing operations that need to be public */
-	void mouse_add_new_marker (samplepos_t where, bool is_cd=false);
-	void split_regions_at (ARDOUR::MusicSample, RegionSelection&);
+	void mouse_add_new_marker (Temporal::timepos_t where, ARDOUR::Location::Flags extra_flags = ARDOUR::Location::Flags (0), int32_t cue_id = 0);
+	void split_regions_at (Temporal::timepos_t const & , RegionSelection&);
 	void split_region_at_points (boost::shared_ptr<ARDOUR::Region>, ARDOUR::AnalysisFeatureList&, bool can_ferret, bool select_new = false);
-	RegionSelection get_regions_from_selection_and_mouse (samplepos_t);
+	RegionSelection get_regions_from_selection_and_mouse (Temporal::timepos_t const &);
 	void do_remove_gaps ();
-	void remove_gaps (samplecnt_t threshold, samplecnt_t leave, bool markers_too);
+	void remove_gaps (Temporal::timecnt_t const & threshold, Temporal::timecnt_t const & leave, bool markers_too);
 
-	void mouse_brush_insert_region (RegionView*, samplepos_t pos);
+	void mouse_brush_insert_region (RegionView*, Temporal::timepos_t const & pos);
 
-	void mouse_add_new_tempo_event (samplepos_t where);
-	void mouse_add_new_meter_event (samplepos_t where);
-	void edit_tempo_section (ARDOUR::TempoSection*);
-	void edit_meter_section (ARDOUR::MeterSection*);
+	void mouse_add_new_tempo_event (Temporal::timepos_t where);
+	void mouse_add_new_meter_event (Temporal::timepos_t where);
+	void edit_tempo_section (Temporal::TempoPoint&);
+	void edit_meter_section (Temporal::MeterPoint&);
+
+	bool should_ripple () const;
+	bool should_ripple_all () const;  /* RippleAll will ripple all similar regions and the timeline markers */
+	void do_ripple (boost::shared_ptr<ARDOUR::Playlist>, Temporal::timepos_t const &, Temporal::timecnt_t const &, ARDOUR::RegionList* exclude, bool add_to_command);
+	void do_ripple (boost::shared_ptr<ARDOUR::Playlist>, Temporal::timepos_t const &, Temporal::timecnt_t const &, boost::shared_ptr<ARDOUR::Region> exclude, bool add_to_command);
+	void ripple_marks (boost::shared_ptr<ARDOUR::Playlist> target_playlist, Temporal::timepos_t at, Temporal::timecnt_t const & distance);
+	void get_markers_to_ripple (boost::shared_ptr<ARDOUR::Playlist> target_playlist, Temporal::timepos_t const & pos, std::vector<ArdourMarker*>& markers);
+	Temporal::timepos_t effective_ripple_mark_start (boost::shared_ptr<ARDOUR::Playlist> target_playlist, Temporal::timepos_t pos);
 
 	void add_region_marker ();
 	void clear_region_markers ();
@@ -607,7 +630,7 @@ private:
 	// to keep track of the playhead position for control_scroll
 	boost::optional<samplepos_t> _control_scroll_target;
 
-	TimeInfoBox*      _time_info_box;
+	SelectionPropertiesBox*      _properties_box;
 
 	typedef std::pair<TimeAxisView*,XMLNode*> TAVState;
 
@@ -720,7 +743,7 @@ private:
 		void setup_lines ();
 
 		void set_name (const std::string&);
-		void set_position (samplepos_t start, samplepos_t end = 0);
+		void set_position (Temporal::timepos_t const & start, Temporal::timepos_t const & end = Temporal::timepos_t());
 		void set_color_rgba (uint32_t);
 	};
 
@@ -734,7 +757,7 @@ private:
 	LocationMarkerMap location_markers;
 
 	void update_marker_labels ();
-	void update_marker_labels (ArdourCanvas::Container*);
+	void update_marker_labels (ArdourCanvas::Item*);
 	void check_marker_label (ArdourMarker*);
 
 	/** A set of lists of Markers that are in each of the canvas groups
@@ -743,17 +766,19 @@ private:
 	 *  a marker has moved we can decide whether we need to update the labels
 	 *  for all markers or for just a few.
 	 */
-	std::map<ArdourCanvas::Container*, std::list<ArdourMarker*> > _sorted_marker_lists;
+	std::map<ArdourCanvas::Item*, std::list<ArdourMarker*> > _sorted_marker_lists;
 	void remove_sorted_marker (ArdourMarker*);
 
 	void hide_marker (ArdourCanvas::Item*, GdkEvent*);
 	void clear_marker_display ();
-	void mouse_add_new_range (samplepos_t);
-	void mouse_add_new_loop (samplepos_t);
-	void mouse_add_new_punch (samplepos_t);
+	void mouse_add_new_range (Temporal::timepos_t);
+	void mouse_add_new_loop (Temporal::timepos_t);
+	void mouse_add_new_punch (Temporal::timepos_t);
 	bool choose_new_marker_name(std::string &name, bool is_range=false);
 	void update_cd_marker_display ();
 	void ensure_cd_marker_updated (LocationMarkers* lam, ARDOUR::Location* location);
+	void update_cue_marker_display ();
+	void ensure_cue_marker_updated (LocationMarkers* lam, ARDOUR::Location* location);
 
 	TimeAxisView*      clicked_axisview;
 	RouteTimeAxisView* clicked_routeview;
@@ -769,11 +794,13 @@ private:
 	void sort_track_selection (TrackViewList&);
 
 	void get_equivalent_regions (RegionView* rv, std::vector<RegionView*> &, PBD::PropertyID) const;
+	void get_all_equivalent_regions (RegionView* rv, std::vector<RegionView*> &) const;
 	RegionSelection get_equivalent_regions (RegionSelection &, PBD::PropertyID) const;
 	RegionView* regionview_from_region (boost::shared_ptr<ARDOUR::Region>) const;
 	RouteTimeAxisView* rtav_from_route (boost::shared_ptr<ARDOUR::Route>) const;
 
 	void mapover_tracks_with_unique_playlists (sigc::slot<void,RouteTimeAxisView&,uint32_t> sl, TimeAxisView*, PBD::PropertyID) const;
+	void mapover_all_tracks_with_unique_playlists (sigc::slot<void,RouteTimeAxisView&,uint32_t>) const;
 	void mapped_get_equivalent_regions (RouteTimeAxisView&, uint32_t, RegionView*, std::vector<RegionView*>*) const;
 
 	void mapover_grouped_routes (sigc::slot<void, RouteUI&> sl, RouteUI*, PBD::PropertyID) const;
@@ -833,6 +860,7 @@ private:
 	void popup_note_context_menu (ArdourCanvas::Item*, GdkEvent*);
 	Gtk::Menu _note_context_menu;
 
+	void initial_display ();
 	void add_stripables (ARDOUR::StripableList&);
 	void add_routes (ARDOUR::RouteList&);
 	void timeaxisview_deleted (TimeAxisView*);
@@ -881,6 +909,7 @@ private:
 	ArdourCanvas::Container* range_marker_group;
 	ArdourCanvas::Container* transport_marker_group;
 	ArdourCanvas::Container* cd_marker_group;
+	ArdourCanvas::Container* cue_marker_group;
 
 	/* parent for groups which themselves contain time markers */
 	ArdourCanvas::Container* _time_markers_group;
@@ -925,6 +954,7 @@ private:
 	Glib::RefPtr<Gtk::ToggleAction> ruler_range_action;
 	Glib::RefPtr<Gtk::ToggleAction> ruler_loop_punch_action;
 	Glib::RefPtr<Gtk::ToggleAction> ruler_cd_marker_action;
+	Glib::RefPtr<Gtk::ToggleAction> ruler_cue_marker_action;
 	bool                            no_ruler_shown_update;
 
 	Gtk::Widget* ruler_grabbed_widget;
@@ -936,7 +966,7 @@ private:
 	void compute_fixed_ruler_scale (); //calculates the RulerScale of the fixed rulers
 	void update_fixed_rulers ();
 	void update_tempo_based_rulers ();
-	void popup_ruler_menu (samplepos_t where = 0, ItemType type = RegionItem);
+	void popup_ruler_menu (Temporal::timepos_t const & where = Temporal::timepos_t (), ItemType type = RegionItem);
 	void update_ruler_visibility ();
 	void toggle_ruler_visibility ();
 	void ruler_toggled (int);
@@ -1014,6 +1044,9 @@ private:
 	ArdourCanvas::Rectangle* range_marker_bar;
 	ArdourCanvas::Rectangle* transport_marker_bar;
 	ArdourCanvas::Rectangle* cd_marker_bar;
+	ArdourCanvas::Rectangle* cue_marker_bar;
+
+	void toggle_cue_behavior ();
 
 	Gtk::Label  minsec_label;
 	Gtk::Label  bbt_label;
@@ -1025,6 +1058,7 @@ private:
 	Gtk::Label  range_mark_label;
 	Gtk::Label  transport_mark_label;
 	Gtk::Label  cd_mark_label;
+	Gtk::Label  cue_mark_label;
 
 	/* videtimline related actions */
 	Gtk::Label                videotl_label;
@@ -1054,7 +1088,7 @@ private:
 
 	samplepos_t playhead_cursor_sample () const;
 
-	samplepos_t get_region_boundary (samplepos_t pos, int32_t dir, bool with_selection, bool only_onscreen);
+	Temporal::timepos_t get_region_boundary (Temporal::timepos_t const & pos, int32_t dir, bool with_selection, bool only_onscreen);
 
 	void    cursor_to_region_boundary (bool with_selection, int32_t dir);
 	void    cursor_to_next_region_boundary (bool with_selection);
@@ -1079,10 +1113,10 @@ private:
 	void    select_all_selectables_between (bool within);
 	void    select_range_between ();
 
-	boost::shared_ptr<ARDOUR::Region> find_next_region (ARDOUR::samplepos_t, ARDOUR::RegionPoint, int32_t dir, TrackViewList&, TimeAxisView** = 0);
-	ARDOUR::samplepos_t find_next_region_boundary (ARDOUR::samplepos_t, int32_t dir, const TrackViewList&);
+	boost::shared_ptr<ARDOUR::Region> find_next_region (Temporal::timepos_t const &, ARDOUR::RegionPoint, int32_t dir, TrackViewList&, TimeAxisView** = 0);
+	Temporal::timepos_t find_next_region_boundary (Temporal::timepos_t const &, int32_t dir, const TrackViewList&);
 
-	std::vector<ARDOUR::samplepos_t> region_boundary_cache;
+	std::vector<Temporal::timepos_t> region_boundary_cache;
 	void mark_region_boundary_cache_dirty () { _region_boundary_cache_dirty = true; }
 	void build_region_boundary_cache ();
 	bool	_region_boundary_cache_dirty;
@@ -1128,6 +1162,8 @@ private:
 	Gtk::VBox           track_canvas_vbox;
 	Gtk::VBox           edit_controls_vbox;
 	Gtk::HBox           edit_controls_hbox;
+
+	TriggerClipPicker    _trigger_clip_picker;
 
 	void control_vertical_zoom_in_all ();
 	void control_vertical_zoom_out_all ();
@@ -1181,6 +1217,7 @@ private:
 
 	/* track views */
 	TrackViewList track_views;
+
 	std::pair<TimeAxisView*, double> trackview_by_y_position (double, bool trackview_relative_offset = true) const;
 
 	AxisView* axis_view_by_stripable (boost::shared_ptr<ARDOUR::Stripable>) const;
@@ -1191,6 +1228,16 @@ private:
 	}
 
 	TrackViewList get_tracks_for_range_action () const;
+
+	Gtk::VBox list_vpacker;
+
+	void queue_redisplay_track_views ();
+	bool process_redisplay_track_views ();
+	bool redisplay_track_views (); // do not call this directly, use above wrappers
+
+	bool             _tvl_no_redisplay;
+	bool             _tvl_redisplay_on_resume;
+	sigc::connection _tvl_redisplay_connection;
 
 	sigc::connection super_rapid_screen_update_connection;
 	void center_screen_internal (samplepos_t, float);
@@ -1237,18 +1284,18 @@ private:
 
 	/* CUT/COPY/PASTE */
 
-	samplepos_t last_paste_pos;
+	Temporal::timepos_t last_paste_pos;
 	unsigned    paste_count;
 
 	void cut_copy (Editing::CutCopyOp);
 	bool can_cut_copy () const;
-	void cut_copy_points (Editing::CutCopyOp, Temporal::Beats earliest=Temporal::Beats(), bool midi=false);
+	void cut_copy_points (Editing::CutCopyOp, Temporal::timepos_t const & earliest);
 	void cut_copy_regions (Editing::CutCopyOp, RegionSelection&);
 	void cut_copy_ranges (Editing::CutCopyOp);
 	void cut_copy_midi (Editing::CutCopyOp);
 
 	void mouse_paste ();
-	void paste_internal (samplepos_t position, float times, const int32_t sub_num);
+	void paste_internal (Temporal::timepos_t const & position, float times);
 
 	/* EDITING OPERATIONS */
 
@@ -1278,16 +1325,17 @@ private:
 	void lower_region_to_bottom ();
 	void split_region_at_transients ();
 	void crop_region_to_selection ();
-	void crop_region_to (samplepos_t start, samplepos_t end);
-	void set_sync_point (samplepos_t, const RegionSelection&);
+	void crop_region_to (Temporal::timepos_t const & start, Temporal::timepos_t const & end);
+	void set_sync_point (Temporal::timepos_t const &, const RegionSelection&);
 	void set_region_sync_position ();
 	void remove_region_sync();
 	void align_regions (ARDOUR::RegionPoint);
 	void align_regions_relative (ARDOUR::RegionPoint point);
-	void align_region (boost::shared_ptr<ARDOUR::Region>, ARDOUR::RegionPoint point, samplepos_t position);
-	void align_region_internal (boost::shared_ptr<ARDOUR::Region>, ARDOUR::RegionPoint point, samplepos_t position);
+	void align_region (boost::shared_ptr<ARDOUR::Region>, ARDOUR::RegionPoint point, Temporal::timepos_t const & position);
+	void align_region_internal (boost::shared_ptr<ARDOUR::Region>, ARDOUR::RegionPoint point, Temporal::timepos_t const & position);
 	void recover_regions (ARDOUR::RegionList);
 	void remove_selected_regions ();
+	void remove_regions (const RegionSelection&, bool can_ripple, bool as_part_of_other_command);
 	void remove_clicked_region ();
 	void show_region_properties ();
 	void show_midi_list_editor ();
@@ -1304,13 +1352,14 @@ private:
 	void reverse_region ();
 	void strip_region_silence ();
 	void normalize_region ();
-	void reset_region_scale_amplitude ();
 	void adjust_region_gain (bool up);
 	void reset_region_gain ();
 	void quantize_region ();
 	void quantize_regions (const RegionSelection& rs);
 	void legatize_region (bool shrink_only);
 	void legatize_regions (const RegionSelection& rs, bool shrink_only);
+	void deinterlace_midi_regions (const RegionSelection& rs);
+	void deinterlace_selected_midi_regions ();
 	void transform_region ();
 	void transform_regions (const RegionSelection& rs);
 	void transpose_region ();
@@ -1319,18 +1368,18 @@ private:
 	void fork_region ();
 
 	void do_insert_time ();
-	void insert_time (samplepos_t, samplecnt_t, Editing::InsertTimeOption, bool, bool, bool, bool, bool, bool);
+	void insert_time (Temporal::timepos_t const &, Temporal::timecnt_t const &, Editing::InsertTimeOption, bool, bool, bool, bool, bool, bool);
 
 	void do_remove_time ();
-	void remove_time (samplepos_t pos, samplecnt_t distance, Editing::InsertTimeOption opt, bool ignore_music_glue, bool markers_too,
-			bool glued_markers_too, bool locked_markers_too, bool tempo_too);
+	void remove_time (Temporal::timepos_t const & pos, Temporal::timecnt_t const & distance, Editing::InsertTimeOption opt, bool ignore_music_glue, bool markers_too,
+	                  bool glued_markers_too, bool locked_markers_too, bool tempo_too);
 
 	void tab_to_transient (bool forward);
 
 	void set_tempo_from_region ();
 	void use_range_as_bar ();
 
-	void define_one_bar (samplepos_t start, samplepos_t end);
+	void define_one_bar (Temporal::timepos_t const & start, Temporal::timepos_t const & end);
 
 	void audition_region_from_region_list ();
 
@@ -1382,14 +1431,14 @@ private:
 
 	void bring_in_external_audio (Editing::ImportMode mode,  samplepos_t& pos);
 
-	bool  idle_drop_paths  (std::vector<std::string> paths, samplepos_t sample, double ypos, bool copy);
-	void  drop_paths_part_two  (const std::vector<std::string>& paths, samplepos_t sample, double ypos, bool copy);
+	bool  idle_drop_paths  (std::vector<std::string> paths, Temporal::timepos_t sample, double ypos, bool copy);
+	void  drop_paths_part_two  (const std::vector<std::string>& paths, Temporal::timepos_t const & sample, double ypos, bool copy);
 
 	int import_sndfiles (std::vector<std::string>              paths,
 	                     Editing::ImportDisposition            disposition,
 	                     Editing::ImportMode                   mode,
 	                     ARDOUR::SrcQuality                    quality,
-	                     samplepos_t&                          pos,
+	                     Temporal::timepos_t&                  pos,
 	                     int                                   target_regions,
 	                     int                                   target_tracks,
 	                     boost::shared_ptr<ARDOUR::Track>&     track,
@@ -1402,7 +1451,7 @@ private:
 	                    bool&                                 check_sample_rate,
 	                    Editing::ImportDisposition            disposition,
 	                    Editing::ImportMode                   mode,
-	                    samplepos_t&                          pos,
+	                    Temporal::timepos_t&                  pos,
 	                    int                                   target_regions,
 	                    int                                   target_tracks,
 	                    boost::shared_ptr<ARDOUR::Track>&     track,
@@ -1411,7 +1460,7 @@ private:
 
 	int add_sources (std::vector<std::string>              paths,
 	                 ARDOUR::SourceList&                   sources,
-	                 samplepos_t&                          pos,
+	                 Temporal::timepos_t&                  pos,
 	                 Editing::ImportDisposition            disposition,
 	                 Editing::ImportMode                   mode,
 	                 int                                   target_regions,
@@ -1424,7 +1473,7 @@ private:
 	int finish_bringing_in_material (boost::shared_ptr<ARDOUR::Region>     region,
 	                                 uint32_t                              in_chans,
 	                                 uint32_t                              out_chans,
-	                                 samplepos_t&                          pos,
+	                                 Temporal::timepos_t&                  pos,
 	                                 Editing::ImportMode                   mode,
 	                                 boost::shared_ptr<ARDOUR::Track>&     existing_track,
 	                                 std::string const&                    new_track_name,
@@ -1460,7 +1509,7 @@ private:
 		}
 
 		Editing::ImportMode mode;
-		samplepos_t pos;
+		Temporal::timepos_t pos;
 		int target_tracks;
 		int target_regions;
 		boost::shared_ptr<ARDOUR::Track> track;
@@ -1476,8 +1525,8 @@ private:
 
 	void import_audio (bool as_tracks);
 	void do_import (std::vector<std::string> paths, bool split, bool as_tracks);
-	void import_smf_tempo_map (Evoral::SMF const &, samplepos_t pos);
-	void import_smf_markers (Evoral::SMF &, samplepos_t pos);
+	void import_smf_tempo_map (Evoral::SMF const &, Temporal::timepos_t const & pos);
+	void import_smf_markers (Evoral::SMF &, Temporal::timepos_t const & pos);
 	void move_to_start ();
 	void move_to_end ();
 	void center_playhead ();
@@ -1489,6 +1538,7 @@ private:
 	void scroll_forward (float pages=0.8f);
 	void scroll_tracks_down ();
 	void scroll_tracks_up ();
+	void move_selected_tracks (bool);
 	void set_mark ();
 	void clear_markers ();
 	void clear_xrun_markers ();
@@ -1513,7 +1563,7 @@ private:
 	void set_selection_from_loop ();
 	void set_selection_from_region ();
 
-	void add_location_mark (samplepos_t where);
+	void add_location_mark (Temporal::timepos_t const & where);
 	void add_location_from_region ();
 	void add_locations_from_region ();
 	void add_location_from_selection ();
@@ -1528,8 +1578,8 @@ private:
 
 	void set_loop_from_region (bool play);
 
-	void set_loop_range (samplepos_t start, samplepos_t end, std::string cmd);
-	void set_punch_range (samplepos_t start, samplepos_t end, std::string cmd);
+	void set_loop_range (Temporal::timepos_t const & start, Temporal::timepos_t const & end, std::string cmd);
+	void set_punch_range (Temporal::timepos_t const & start, Temporal::timepos_t const & end, std::string cmd);
 
 	void toggle_location_at_playhead_cursor ();
 	void add_location_from_playhead_cursor ();
@@ -1569,6 +1619,10 @@ private:
 
 	Editing::GridType _grid_type;
 	Editing::SnapMode _snap_mode;
+
+	Editing::GridType _draw_length;
+	int _draw_velocity;
+	int _draw_channel;
 
 	bool ignore_gui_changes;
 
@@ -1610,9 +1664,8 @@ private:
 
 	gint mouse_rename_region (ArdourCanvas::Item*, GdkEvent*);
 
-	void add_region_drag (ArdourCanvas::Item*, GdkEvent*, RegionView*);
+	void add_region_drag (ArdourCanvas::Item*, GdkEvent*, RegionView*, bool copy);
 	void start_create_region_grab (ArdourCanvas::Item*, GdkEvent*);
-	void add_region_copy_drag (ArdourCanvas::Item*, GdkEvent*, RegionView*);
 	void add_region_brush_drag (ArdourCanvas::Item*, GdkEvent*, RegionView*);
 	void start_selection_grab (ArdourCanvas::Item*, GdkEvent*);
 
@@ -1646,6 +1699,7 @@ private:
 	bool canvas_tempo_marker_event (GdkEvent* event,ArdourCanvas::Item*, TempoMarker*);
 	bool canvas_tempo_curve_event (GdkEvent* event,ArdourCanvas::Item*, TempoCurve*);
 	bool canvas_meter_marker_event (GdkEvent* event,ArdourCanvas::Item*, MeterMarker*);
+	bool canvas_bbt_marker_event (GdkEvent* event,ArdourCanvas::Item*, BBTMarker*);
 	bool canvas_automation_track_event(GdkEvent* event, ArdourCanvas::Item*, AutomationTimeAxisView*);
 	bool canvas_note_event (GdkEvent* event, ArdourCanvas::Item*);
 
@@ -1656,6 +1710,7 @@ private:
 	bool canvas_range_marker_bar_event (GdkEvent* event, ArdourCanvas::Item*);
 	bool canvas_transport_marker_bar_event (GdkEvent* event, ArdourCanvas::Item*);
 	bool canvas_cd_marker_bar_event (GdkEvent* event, ArdourCanvas::Item*);
+	bool canvas_cue_marker_bar_event (GdkEvent* event, ArdourCanvas::Item*);
 
 	bool canvas_videotl_bar_event (GdkEvent* event, ArdourCanvas::Item*);
 	void update_video_timeline (bool flush = false);
@@ -1672,6 +1727,10 @@ private:
 
 	PBD::Signal0<void> EditorFreeze;
 	PBD::Signal0<void> EditorThaw;
+
+	Temporal::TempoMap::WritableSharedPtr begin_tempo_map_edit ();
+	void abort_tempo_map_edit ();
+	void mid_tempo_change ();
 
 private:
 	friend class DragManager;
@@ -1727,8 +1786,8 @@ private:
 
 	void remove_tempo_marker (ArdourCanvas::Item*);
 	void remove_meter_marker (ArdourCanvas::Item*);
-	gint real_remove_tempo_marker (ARDOUR::TempoSection*);
-	gint real_remove_meter_marker (ARDOUR::MeterSection*);
+	gint real_remove_tempo_marker (Temporal::TempoPoint const *);
+	gint real_remove_meter_marker (Temporal::MeterPoint const *);
 
 	void edit_tempo_marker (TempoMarker&);
 	void edit_meter_marker (MeterMarker&);
@@ -1743,8 +1802,7 @@ private:
 	void marker_menu_remove ();
 	void marker_menu_rename ();
 	void rename_marker (ArdourMarker* marker);
-	void toggle_marker_lock_style ();
-	void toggle_tempo_clamped ();
+	void toggle_tempo_continues ();
 	void toggle_tempo_type ();
 	void ramp_to_next_tempo ();
 	void toggle_marker_menu_lock ();
@@ -1761,6 +1819,7 @@ private:
 	void marker_menu_set_from_playhead ();
 	void marker_menu_set_from_selection (bool force_regions);
 	void marker_menu_range_to_next ();
+	void marker_menu_change_cue (int cue);
 	void marker_menu_zoom_to_range ();
 	void new_transport_marker_menu_set_loop ();
 	void new_transport_marker_menu_set_punch ();
@@ -1785,19 +1844,28 @@ private:
 	Gtk::Menu* new_transport_marker_menu;
 	ArdourCanvas::Item* marker_menu_item;
 
-	typedef std::list<ArdourMarker*> Marks;
-	Marks metric_marks;
-
-	typedef std::list<TempoCurve*> Curves;
-	Curves tempo_curves;
+	typedef std::list<MetricMarker*> Marks;
+	Marks tempo_marks;
+	Marks meter_marks;
+	Marks bbt_marks;
 
 	void remove_metric_marks ();
-	void draw_metric_marks (const ARDOUR::Metrics& metrics);
+	void draw_metric_marks (Temporal::TempoMap::Metrics const & metrics);
+	void draw_tempo_marks ();
+	void draw_meter_marks ();
+	void draw_bbt_marks ();
 
-	void compute_current_bbt_points (std::vector<ARDOUR::TempoMap::BBTPoint>& grid, samplepos_t left, samplepos_t right);
+	void compute_current_bbt_points (Temporal::TempoMapPoints& grid, samplepos_t left, samplepos_t right);
 
-	void tempo_map_changed (const PBD::PropertyChange&);
-	void tempometric_position_changed (const PBD::PropertyChange&);
+	void reassociate_metric_markers (Temporal::TempoMap::SharedPtr const &);
+	void reassociate_metric_marker (Temporal::TempoMap::SharedPtr const & tmap, Temporal::TempoMap::Metrics & metric, MetricMarker& marker);
+	void make_bbt_marker (Temporal::MusicTimePoint const *);
+	void make_meter_marker (Temporal::MeterPoint const *);
+	void make_tempo_marker (Temporal::TempoPoint const * ts, double& min_tempo, double& max_tempo, Temporal::TempoPoint const *& prev_ts, uint32_t tc_color, samplecnt_t sr);
+	void update_tempo_curves (double min_tempo, double max_tempo, samplecnt_t sr);
+
+	void tempo_map_changed ();
+	void tempo_map_visual_update ();
 
 	void redisplay_grid (bool immediate_redraw);
 
@@ -1851,10 +1919,14 @@ private:
 	Gtk::Button              automation_mode_button;
 
 	//edit mode menu stuff
+	ArdourWidgets::ArdourDropdown ripple_mode_selector;
 	ArdourWidgets::ArdourDropdown	edit_mode_selector;
 	void edit_mode_selection_done (ARDOUR::EditMode);
+	void ripple_mode_selection_done (ARDOUR::RippleMode);
 	void build_edit_mode_menu ();
 	Gtk::VBox edit_mode_box;
+
+	void set_ripple_mode (ARDOUR::RippleMode);
 
 	void set_edit_mode (ARDOUR::EditMode);
 	void cycle_edit_mode ();
@@ -1862,10 +1934,15 @@ private:
 	ArdourWidgets::ArdourDropdown grid_type_selector;
 	void build_grid_type_menu ();
 
+	ArdourWidgets::ArdourDropdown draw_length_selector;
+	ArdourWidgets::ArdourDropdown draw_velocity_selector;
+	ArdourWidgets::ArdourDropdown draw_channel_selector;
+
 	ArdourWidgets::ArdourButton snap_mode_button;
 	bool snap_mode_button_clicked (GdkEventButton*);
 
 	Gtk::HBox snap_box;
+	Gtk::HBox draw_box;
 
 	Gtk::HBox ebox_hpacker;
 	Gtk::VBox ebox_vpacker;
@@ -1880,8 +1957,21 @@ private:
 	void snap_mode_chosen (Editing::SnapMode);
 	void grid_type_chosen (Editing::GridType);
 
+	void draw_length_selection_done (Editing::GridType);
+	void draw_length_chosen (Editing::GridType);
+
+	void draw_velocity_selection_done (int);
+	void draw_velocity_chosen (int);
+
+	void draw_channel_selection_done (int);
+	void draw_channel_chosen (int);
+
 	Glib::RefPtr<Gtk::RadioAction> grid_type_action (Editing::GridType);
 	Glib::RefPtr<Gtk::RadioAction> snap_mode_action (Editing::SnapMode);
+
+	Glib::RefPtr<Gtk::RadioAction> draw_length_action (Editing::GridType);
+	Glib::RefPtr<Gtk::RadioAction> draw_velocity_action (int);
+	Glib::RefPtr<Gtk::RadioAction> draw_channel_action (int);
 
 	//zoom focus meu stuff
 	ArdourWidgets::ArdourDropdown	zoom_focus_selector;
@@ -1916,6 +2006,7 @@ private:
 	void track_selection_changed ();
 	void update_time_selection_display ();
 	void presentation_info_changed (PBD::PropertyChange const &);
+	void handle_gui_changes (std::string const&, void*);
 	void region_selection_changed ();
 	void catch_up_on_midi_selection ();
 	sigc::connection editor_regions_selection_changed_connection;
@@ -1949,6 +2040,7 @@ private:
 	/* transport range select process */
 
 	ArdourCanvas::Rectangle* cd_marker_bar_drag_rect;
+	ArdourCanvas::Rectangle* cue_marker_bar_drag_rect;
 	ArdourCanvas::Rectangle* range_bar_drag_rect;
 	ArdourCanvas::Rectangle* transport_bar_drag_rect;
 	ArdourCanvas::Rectangle* transport_bar_range_rect;
@@ -1968,7 +2060,7 @@ private:
 
 	/* object rubberband select process */
 
-	void select_all_within (samplepos_t, samplepos_t, double, double, TrackViewList const &, Selection::Operation, bool);
+	void select_all_within (Temporal::timepos_t const &, Temporal::timepos_t const &, double, double, TrackViewList const &, Selection::Operation, bool);
 
 	ArdourCanvas::Rectangle* rubberband_rect;
 
@@ -1985,10 +2077,6 @@ private:
 
 	Glib::RefPtr<Gtk::TreeSelection> route_display_selection;
 
-	bool sync_track_view_list_and_routes ();
-
-	Gtk::VBox list_vpacker;
-
 	/* autoscrolling */
 
 	sigc::connection autoscroll_connection;
@@ -2003,7 +2091,7 @@ private:
 	void stop_canvas_autoscroll ();
 
 	/* trimming */
-	void point_trim (GdkEvent*, samplepos_t);
+	void point_trim (GdkEvent*, Temporal::timepos_t const &);
 
 	void trim_region_front();
 	void trim_region_back();
@@ -2020,16 +2108,6 @@ private:
 	bool show_gain_after_trim;
 
 	/* Drag-n-Drop */
-
-	int convert_drop_to_paths (
-	        std::vector<std::string>&           paths,
-	        const Glib::RefPtr<Gdk::DragContext>& context,
-	        gint                                  x,
-	        gint                                  y,
-	        const Gtk::SelectionData&             data,
-	        guint                                 info,
-	        guint                                 time);
-
 	void track_canvas_drag_data_received (
 	        const Glib::RefPtr<Gdk::DragContext>& context,
 	        gint                                  x,
@@ -2052,27 +2130,26 @@ private:
 	        gint                                  y,
 	        const Gtk::SelectionData&             data,
 	        guint                                 info,
-	        guint                                 time,
-	        bool                                  from_region_list);
-
-	void drop_routes (
-	        const Glib::RefPtr<Gdk::DragContext>& context,
-	        gint                x,
-	        gint                y,
-	        const Gtk::SelectionData& data,
-	        guint               info,
-	        guint               time);
+	        guint                                 time);
 
 	/* audio export */
+
+	bool _no_not_select_reimported_tracks;
+
+	enum BounceTarget {
+		NewSource,
+		NewTrigger,
+		ReplaceRange
+	};
 
 	int  write_region_selection(RegionSelection&);
 	bool write_region (std::string path, boost::shared_ptr<ARDOUR::AudioRegion>);
 	void bounce_region_selection (bool with_processing);
-	void bounce_range_selection (bool replace, bool enable_processing);
+	void bounce_range_selection (BounceTarget, bool enable_processing);
 	void external_edit_region ();
 
 	int write_audio_selection (TimeSelection&);
-	bool write_audio_range (ARDOUR::AudioPlaylist&, const ARDOUR::ChanCount& channels, std::list<ARDOUR::AudioRange>&);
+	bool write_audio_range (ARDOUR::AudioPlaylist&, const ARDOUR::ChanCount& channels, std::list<ARDOUR::TimelineRange>&);
 
 	void write_selection ();
 
@@ -2109,6 +2186,13 @@ private:
 	 */
 	samplepos_t canvas_event_sample (GdkEvent const*, double* px = 0, double* py = 0) const;
 
+	/** computes the timeline position for an event whose coordinates
+	 * are in canvas units (pixels, scroll offset included). The time
+	 * domain used by the return value will match ::default_time_domain()
+	 * at the time of calling.
+	 */
+	Temporal::timepos_t canvas_event_time (GdkEvent const*, double* px = 0, double* py = 0) const;
+
 	/** computes the timeline sample (sample) of an event whose coordinates
 	 * are in window units (pixels, no scroll offset).
 	 */
@@ -2122,7 +2206,7 @@ private:
 	static void* timefx_thread (void* arg);
 	void do_timefx ();
 
-	int time_stretch (RegionSelection&, float fraction);
+	int time_stretch (RegionSelection&, Temporal::ratio_t const & fraction);
 	int pitch_shift (RegionSelection&, float cents);
 	void pitch_shift_region ();
 
@@ -2162,11 +2246,15 @@ private:
 	Command* apply_midi_note_edit_op_to_region (ARDOUR::MidiOperator& op, MidiRegionView& mrv);
 	void apply_midi_note_edit_op (ARDOUR::MidiOperator& op, const RegionSelection& rs);
 
+	/* plugin setup */
+	int plugin_setup (boost::shared_ptr<ARDOUR::Route>, boost::shared_ptr<ARDOUR::PluginInsert>, ARDOUR::Route::PluginSetupOptions);
+
 	/* handling cleanup */
 
 	int playlist_deletion_dialog (boost::shared_ptr<ARDOUR::Playlist>);
 
 	PBD::ScopedConnectionList session_connections;
+	PBD::ScopedConnection tempo_map_connection;
 
 	/* tracking step changes of track height */
 
@@ -2220,13 +2308,14 @@ private:
 	Glib::RefPtr<Gtk::RadioAction> edit_point_action (Editing::EditPoint);
 	std::vector<std::string> edit_point_strings;
 	std::vector<std::string> edit_mode_strings;
+	std::vector<std::string> ripple_mode_strings;
 
 	void selected_marker_moved (ARDOUR::Location*);
 
-	bool get_edit_op_range (samplepos_t& start, samplepos_t& end) const;
+	bool get_edit_op_range (Temporal::timepos_t& start, Temporal::timepos_t& end) const;
 
-	void get_regions_at (RegionSelection&, samplepos_t where, const TrackViewList& ts) const;
-	void get_regions_after (RegionSelection&, samplepos_t where, const TrackViewList& ts) const;
+	void get_regions_at (RegionSelection&, Temporal::timepos_t const & where, const TrackViewList& ts) const;
+	void get_regions_after (RegionSelection&, Temporal::timepos_t const & where, const TrackViewList& ts) const;
 
 	RegionSelection get_regions_from_selection_and_edit_point (Editing::EditIgnoreOption = Editing::EDIT_IGNORE_NONE,
 	                                                           bool use_context_click = false,
@@ -2240,33 +2329,33 @@ private:
 	void select_next_stripable (bool routes_only = true);
 	void select_prev_stripable (bool routes_only = true);
 
-	ARDOUR::MusicSample snap_to_minsec (ARDOUR::MusicSample start,
-	                                    ARDOUR::RoundMode   direction,
+	Temporal::timepos_t snap_to_minsec (Temporal::timepos_t const & start,
+	                                    Temporal::RoundMode   direction,
 	                                    ARDOUR::SnapPref    gpref);
 
-	ARDOUR::MusicSample snap_to_cd_frames (ARDOUR::MusicSample start,
-	                                       ARDOUR::RoundMode   direction,
+	Temporal::timepos_t snap_to_cd_frames (Temporal::timepos_t const & start,
+	                                       Temporal::RoundMode   direction,
 	                                       ARDOUR::SnapPref    gpref);
 
-	ARDOUR::MusicSample snap_to_bbt (ARDOUR::MusicSample start,
-	                                 ARDOUR::RoundMode   direction,
-	                                 ARDOUR::SnapPref    gpref);
-
-	ARDOUR::MusicSample snap_to_timecode (ARDOUR::MusicSample start,
-	                                      ARDOUR::RoundMode   direction,
+	Temporal::timepos_t snap_to_timecode (Temporal::timepos_t const & start,
+	                                      Temporal::RoundMode   direction,
 	                                      ARDOUR::SnapPref    gpref);
 
-	ARDOUR::MusicSample snap_to_grid (ARDOUR::MusicSample start,
-	                                  ARDOUR::RoundMode   direction,
+	Temporal::timepos_t snap_to_grid (Temporal::timepos_t const & start,
+	                                  Temporal::RoundMode   direction,
 	                                  ARDOUR::SnapPref    gpref);
 
-	void snap_to_internal (ARDOUR::MusicSample& first,
-	                       ARDOUR::RoundMode    direction = ARDOUR::RoundNearest,
+	void snap_to_internal (Temporal::timepos_t& first,
+	                       Temporal::RoundMode    direction = Temporal::RoundNearest,
 	                       ARDOUR::SnapPref     gpref = ARDOUR::SnapToAny_Visual,
 	                       bool                 ensure_snap = false);
 
-	samplepos_t snap_to_marker (samplepos_t       presnap,
-	                            ARDOUR::RoundMode direction = ARDOUR::RoundNearest);
+	void timecode_snap_to_internal (Temporal::timepos_t & first,
+	                                Temporal::RoundMode   direction = Temporal::RoundNearest,
+	                                bool                for_mark  = false);
+
+	Temporal::timepos_t snap_to_marker (Temporal::timepos_t const & presnap,
+	                                    Temporal::RoundMode direction = Temporal::RoundNearest);
 
 	RhythmFerret* rhythm_ferret;
 
@@ -2345,7 +2434,7 @@ private:
 	void set_show_touched_automation (bool);
 	bool _show_touched_automation;
 
-	int time_fx (ARDOUR::RegionList&, float val, bool pitching);
+	int time_fx (ARDOUR::RegionList&, Temporal::ratio_t ratio, bool pitching);
 	void note_edit_done (int, EditNoteDialog*);
 	void toggle_sound_midi_notes ();
 
@@ -2384,18 +2473,19 @@ private:
 	void toggle_reg_sens (Glib::RefPtr<Gtk::ActionGroup> group, char const* name, char const* label, sigc::slot<void> slot);
 	void radio_reg_sens (Glib::RefPtr<Gtk::ActionGroup> action_group, Gtk::RadioAction::Group& radio_group, char const* name, char const* label, sigc::slot<void> slot);
 
-	void remove_gap_marker_callback (samplepos_t at, samplecnt_t distance);
+	void remove_gap_marker_callback (Temporal::timepos_t at, Temporal::timecnt_t distance);
 
 	friend class Drag;
 	friend class RegionCutDrag;
 	friend class RegionDrag;
 	friend class RegionMoveDrag;
-	friend class RegionSpliceDrag;
 	friend class RegionRippleDrag;
 	friend class TrimDrag;
 	friend class BBTRulerDrag;
 	friend class MeterMarkerDrag;
 	friend class TempoMarkerDrag;
+	friend class TempoTwistDrag;
+	friend class TempoEndDrag;
 	friend class CursorDrag;
 	friend class FadeInDrag;
 	friend class FadeOutDrag;

@@ -147,7 +147,7 @@ class MackieControlProtocol
 	void set_flip_mode (FlipMode);
 	void display_view_mode ();
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
 
 	/* Note: because Mackie control is inherently a duplex protocol,
@@ -276,6 +276,8 @@ class MackieControlProtocol
 
 	bool stripable_is_locked_to_strip (boost::shared_ptr<ARDOUR::Stripable>) const;
 
+	CONTROL_PROTOCOL_THREADS_NEED_TEMPO_MAP_DECL();
+
   private:
 
 	struct ButtonHandlers {
@@ -328,7 +330,7 @@ class MackieControlProtocol
 	bool                      needs_ipmidi_restart;
 	bool                     _metering_active;
 	bool                     _initialized;
-	XMLNode*                 configuration_state;
+	mutable XMLNode*         configuration_state;
 	int                      state_version;
 	int                      _last_bank[9];
 	bool                     marker_modifier_consumed_by_button;
@@ -353,11 +355,12 @@ class MackieControlProtocol
 	void clear_surfaces ();
 	void force_special_stripable_to_strip (boost::shared_ptr<ARDOUR::Stripable> r, uint32_t surface, uint32_t strip_number);
 	void build_button_map ();
+	void build_device_specific_button_map ();
 	void stripable_selection_changed ();
 	int ipmidi_restart ();
         void initialize ();
         int set_device_info (const std::string& device_name);
-	void update_configuration_state ();
+	void update_configuration_state () const;
 
 	/* MIDI port connection management */
 
@@ -510,6 +513,32 @@ class MackieControlProtocol
 	Mackie::LedState view_release (Mackie::Button&);
 
 	Mackie::LedState bank_release (Mackie::Button&, uint32_t bank_num);
+	Mackie::LedState master_press(Mackie::Button &);
+	Mackie::LedState master_release(Mackie::Button &);
+	Mackie::LedState redo_press(Mackie::Button &);
+	Mackie::LedState redo_release(Mackie::Button &);
+	Mackie::LedState prev_marker_press(Mackie::Button &);
+	Mackie::LedState prev_marker_release(Mackie::Button &);
+	Mackie::LedState next_marker_press(Mackie::Button &);
+	Mackie::LedState next_marker_release(Mackie::Button &);
+	Mackie::LedState flip_window_press (Mackie::Button&);
+	Mackie::LedState flip_window_release (Mackie::Button&);
+	Mackie::LedState open_press(Mackie::Button &);
+	Mackie::LedState open_release(Mackie::Button &);
+	Mackie::LedState prog2_clear_solo_press(Mackie::Button &);
+	Mackie::LedState prog2_clear_solo_release(Mackie::Button &);
+	Mackie::LedState prog2_save_press(Mackie::Button &);
+	Mackie::LedState prog2_save_release(Mackie::Button &);
+	Mackie::LedState prog2_vst_press(Mackie::Button &);
+	Mackie::LedState prog2_vst_release(Mackie::Button &);
+	Mackie::LedState prog2_left_press(Mackie::Button &);
+	Mackie::LedState prog2_left_release(Mackie::Button &);
+	Mackie::LedState prog2_right_press(Mackie::Button &);
+	Mackie::LedState prog2_right_release(Mackie::Button &);
+	Mackie::LedState prog2_marker_press(Mackie::Button &);
+	Mackie::LedState prog2_marker_release(Mackie::Button &);
+	Mackie::LedState prog2_undo_press(Mackie::Button &);
+	Mackie::LedState prog2_undo_release(Mackie::Button &);
 };
 
 } // namespace

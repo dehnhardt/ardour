@@ -29,8 +29,6 @@
 #include "pbd/enumwriter.h"
 #include "midi++/types.h"
 
-#include "evoral/Range.h" // shouldn't Evoral have its own enum registration?
-
 #include "ardour/delivery.h"
 #include "ardour/disk_io.h"
 #include "ardour/export_channel.h"
@@ -49,6 +47,7 @@
 #include "ardour/track.h"
 #include "ardour/transport_fsm.h"
 #include "ardour/transport_master.h"
+#include "ardour/triggerbox.h"
 #include "ardour/types.h"
 
 using namespace std;
@@ -81,6 +80,7 @@ setup_enum_writer ()
 	MeterLineUp _MeterLineUp;
 	InputMeterLayout _InputMeterLayout;
 	EditMode _EditMode;
+	RippleMode _RippleMode;
 	RegionPoint _RegionPoint;
 	Placement _Placement;
 	MonitorModel _MonitorModel;
@@ -117,8 +117,6 @@ setup_enum_writer ()
 	Source::Flag _Source_Flag;
 	DiskIOProcessor::Flag _DiskIOProcessor_Flag;
 	Location::Flags _Location_Flags;
-	PositionLockStyle _PositionLockStyle;
-	TempoSection::Type _TempoSection_Type;
 	Track::FreezeState _Track_FreezeState;
 	AutomationList::InterpolationStyle _AutomationList_InterpolationStyle;
 	AnyTime::Type _AnyTime_Type;
@@ -146,7 +144,6 @@ setup_enum_writer ()
 	ScreenSaverMode _ScreenSaverMode;
 	Session::PostTransportWork _Session_PostTransportWork;
 	MTC_Status _MIDI_MTC_Status;
-	Evoral::OverlapType _OverlapType;
 	BufferingPreset _BufferingPreset;
 	AutoReturnTarget _AutoReturnTarget;
 	PresentationInfo::Flag _PresentationInfo_Flag;
@@ -159,6 +156,11 @@ setup_enum_writer ()
 	LoopFadeChoice _LoopFadeChooice;
 	TransportState _TransportState;
 	LocateTransportDisposition _LocateTransportDisposition;
+	Trigger::State _TriggerState;
+	Trigger::LaunchStyle _TriggerLaunchStyle;
+	FollowAction::Type _FollowAction;
+	Trigger::StretchMode _TriggerStretchMode;
+	CueBehavior _CueBehavior;
 
 #define REGISTER(e) enum_writer.register_distinct (typeid(e).name(), i, s); i.clear(); s.clear()
 #define REGISTER_BITS(e) enum_writer.register_bits (typeid(e).name(), i, s); i.clear(); s.clear()
@@ -303,9 +305,13 @@ setup_enum_writer ()
 	REGISTER_ENUM (LayoutAutomatic);
 	REGISTER (_InputMeterLayout);
 
+	REGISTER_ENUM (RippleSelected);
+	REGISTER_ENUM (RippleAll);  //enum had to be disambiguated from EditMode:RippleAll
+	REGISTER_ENUM (RippleInterview);
+	REGISTER (_RippleMode);
+
 	REGISTER_ENUM (Slide);
-	REGISTER_ENUM (Splice);
-	REGISTER_ENUM (Ripple); // XXX do the old enum values have to stay in order?
+	REGISTER_ENUM (Ripple);
 	REGISTER_ENUM (Lock);
 	REGISTER (_EditMode);
 	/*
@@ -467,6 +473,7 @@ setup_enum_writer ()
 	REGISTER_CLASS_ENUM (SessionEvent, EndRoll);
 	REGISTER_CLASS_ENUM (SessionEvent, TransportStateChange);
 	REGISTER_CLASS_ENUM (SessionEvent, AutoLoop);
+	REGISTER_CLASS_ENUM (SessionEvent, SyncCues);
 	REGISTER (_SessionEvent_Type);
 
 	REGISTER_CLASS_ENUM (SessionEvent, Add);
@@ -569,11 +576,9 @@ setup_enum_writer ()
 	REGISTER_CLASS_ENUM (Location, IsRangeMarker);
 	REGISTER_CLASS_ENUM (Location, IsSkip);
 	REGISTER_CLASS_ENUM (Location, IsClockOrigin);
+	REGISTER_CLASS_ENUM (Location, IsXrun);
+	REGISTER_CLASS_ENUM (Location, IsCueMarker);
 	REGISTER_BITS (_Location_Flags);
-
-	REGISTER_CLASS_ENUM (TempoSection, Ramp);
-	REGISTER_CLASS_ENUM (TempoSection, Constant);
-	REGISTER (_TempoSection_Type);
 
 	REGISTER_CLASS_ENUM (Track, NoFreeze);
 	REGISTER_CLASS_ENUM (Track, Frozen);
@@ -739,17 +744,6 @@ setup_enum_writer ()
 	REGISTER_ENUM(InhibitAlways);
 	REGISTER(_ScreenSaverMode);
 
-	REGISTER_ENUM(AudioTime);
-	REGISTER_ENUM(MusicTime);
-	REGISTER(_PositionLockStyle);
-
-	REGISTER_ENUM (Evoral::OverlapNone);
-	REGISTER_ENUM (Evoral::OverlapInternal);
-	REGISTER_ENUM (Evoral::OverlapStart);
-	REGISTER_ENUM (Evoral::OverlapEnd);
-	REGISTER_ENUM (Evoral::OverlapExternal);
-	REGISTER(_OverlapType);
-
 	REGISTER_ENUM (Small);
 	REGISTER_ENUM (Medium);
 	REGISTER_ENUM (Large);
@@ -773,6 +767,10 @@ setup_enum_writer ()
 	REGISTER_CLASS_ENUM (PresentationInfo, Hidden);
 	REGISTER_CLASS_ENUM (PresentationInfo, OrderSet);
 	REGISTER_CLASS_ENUM (PresentationInfo, FoldbackBus);
+	REGISTER_CLASS_ENUM (PresentationInfo, TriggerTrack);
+#ifdef MIXBUS
+	REGISTER_CLASS_ENUM (PresentationInfo, MixbusEditorHidden);
+#endif
 	REGISTER_BITS (_PresentationInfo_Flag);
 
 	REGISTER_CLASS_ENUM (MusicalMode,Dorian);
@@ -856,6 +854,41 @@ setup_enum_writer ()
 	REGISTER_ENUM (MustRoll);
 	REGISTER_ENUM (RollIfAppropriate);
 	REGISTER (_LocateTransportDisposition);
+
+	REGISTER_CLASS_ENUM (Trigger, Stopped);
+	REGISTER_CLASS_ENUM (Trigger, WaitingToStart);
+	REGISTER_CLASS_ENUM (Trigger, Running);
+	REGISTER_CLASS_ENUM (Trigger, WaitingForRetrigger);
+	REGISTER_CLASS_ENUM (Trigger, WaitingToStop);
+	REGISTER_CLASS_ENUM (Trigger, WaitingToSwitch);
+	REGISTER_CLASS_ENUM (Trigger, Stopping);
+	REGISTER (_TriggerState);
+
+	REGISTER_CLASS_ENUM (FollowAction, None);
+	REGISTER_CLASS_ENUM (FollowAction, Stop);
+	REGISTER_CLASS_ENUM (FollowAction, Again);
+	REGISTER_CLASS_ENUM (FollowAction, ForwardTrigger);
+	REGISTER_CLASS_ENUM (FollowAction, ReverseTrigger);
+	REGISTER_CLASS_ENUM (FollowAction, FirstTrigger);
+	REGISTER_CLASS_ENUM (FollowAction, LastTrigger);
+	REGISTER_CLASS_ENUM (FollowAction, JumpTrigger);
+	REGISTER (_FollowAction);
+
+	REGISTER_CLASS_ENUM (Trigger, OneShot);
+	REGISTER_CLASS_ENUM (Trigger, ReTrigger);
+	REGISTER_CLASS_ENUM (Trigger, Gate);
+	REGISTER_CLASS_ENUM (Trigger, Toggle);
+	REGISTER_CLASS_ENUM (Trigger, Repeat);
+	REGISTER (_TriggerLaunchStyle);
+
+	REGISTER_CLASS_ENUM (Trigger, Crisp);
+	REGISTER_CLASS_ENUM (Trigger, Mixed);
+	REGISTER_CLASS_ENUM (Trigger, Smooth);
+	REGISTER (_TriggerStretchMode);
+
+	REGISTER_ENUM (FollowCues);
+	REGISTER_ENUM (ImplicitlyIgnoreCues);
+	REGISTER_BITS (_CueBehavior);
 }
 
 } /* namespace ARDOUR */

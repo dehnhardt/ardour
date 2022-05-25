@@ -215,13 +215,13 @@ void
 AutomationController::start_touch()
 {
 	_grabbed = true;
-	_controllable->start_touch (_controllable->session().transport_sample());
+	_controllable->start_touch (timepos_t (_controllable->session().transport_sample()));
 }
 
 void
 AutomationController::end_touch ()
 {
-	_controllable->stop_touch (_controllable->session().transport_sample());
+	_controllable->stop_touch (timepos_t (_controllable->session().transport_sample()));
 	if (_grabbed) {
 		_grabbed = false;
 		display_effective_value ();
@@ -284,7 +284,7 @@ AutomationController::set_freq_beats(double beats)
 	const ARDOUR::ParameterDescriptor& desc    = _controllable->desc();
 	const ARDOUR::Session&             session = _controllable->session();
 	const samplepos_t                  pos     = session.transport_sample();
-	const ARDOUR::Tempo&               tempo   = session.tempo_map().tempo_at_sample (pos);
+	const Temporal::Tempo&             tempo   = Temporal::TempoMap::use()->metric_at (pos).tempo();
 	const double                       bpm     = tempo.note_types_per_minute();
 	const double                       bps     = bpm / 60.0;
 	const double                       freq    = bps / beats;

@@ -71,7 +71,7 @@ LineSet::compute_bounding_box () const
 		}
 	}
 
-	_bounding_box_dirty = false;
+	set_bbox_clean ();
 }
 
 void
@@ -80,7 +80,7 @@ LineSet::set_extent (Distance e)
 	begin_change ();
 
 	_extent = e;
-	_bounding_box_dirty = true;
+	set_bbox_dirty ();
 
 	end_change ();
 }
@@ -131,14 +131,14 @@ LineSet::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) const
 }
 
 void
-LineSet::add (Coord y, Distance width, Gtkmm2ext::Color color)
+LineSet::add_coord (Coord y, Distance width, Gtkmm2ext::Color color)
 {
 	begin_change ();
 
 	_lines.push_back (Line (y, width, color));
 	sort (_lines.begin(), _lines.end(), LineSorter());
 
-	_bounding_box_dirty = true;
+	set_bbox_dirty ();
 	end_change ();
 }
 
@@ -147,7 +147,7 @@ LineSet::clear ()
 {
 	begin_change ();
 	_lines.clear ();
-	_bounding_box_dirty = true;
+	set_bbox_dirty ();
 	end_change ();
 }
 

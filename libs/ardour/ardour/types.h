@@ -31,6 +31,7 @@
 #ifndef __ardour_types_h__
 #define __ardour_types_h__
 
+#include <bitset>
 #include <istream>
 #include <vector>
 #include <map>
@@ -43,13 +44,14 @@
 #include <inttypes.h>
 
 #include "temporal/bbt_time.h"
+#include "temporal/range.h"
+#include "temporal/superclock.h"
 #include "temporal/time.h"
+#include "temporal/timeline.h"
 #include "temporal/types.h"
 
 #include "pbd/id.h"
 #include "pbd/microseconds.h"
-
-#include "evoral/Range.h"
 
 #include "ardour/chan_count.h"
 #include "ardour/plugin_types.h"
@@ -67,6 +69,7 @@ namespace ARDOUR {
 
 class Source;
 class AudioSource;
+class GraphNode;
 class Route;
 class Region;
 class Stripable;
@@ -84,6 +87,10 @@ typedef uint32_t pframes_t;
 typedef Temporal::samplecnt_t samplecnt_t;
 typedef Temporal::samplepos_t samplepos_t;
 typedef Temporal::sampleoffset_t sampleoffset_t;
+
+typedef Temporal::timepos_t timepos_t;
+typedef Temporal::timecnt_t timecnt_t;
+typedef Temporal::superclock_t superclock_t;
 
 static const layer_t    max_layer    = UINT32_MAX;
 
@@ -249,14 +256,6 @@ enum ColorMode {
 	TrackColor
 };
 
-enum RoundMode {
-	RoundDownMaybe  = -2,  ///< Round down only if necessary
-	RoundDownAlways = -1,  ///< Always round down, even if on a division
-	RoundNearest    = 0,   ///< Round to nearest
-	RoundUpAlways   = 1,   ///< Always round up, even if on a division
-	RoundUpMaybe    = 2    ///< Round up only if necessary
-};
-
 enum SnapPref {
 	SnapToAny_Visual    = 0, /**< Snap to the editor's visual snap
 	                          * (incoprorating snap prefs and the current zoom scaling)
@@ -284,7 +283,7 @@ class AnyTime {
 	Type type;
 
 	Timecode::Time     timecode;
-	Timecode::BBT_Time bbt;
+	Temporal::BBT_Time bbt;
 
 	union {
 		samplecnt_t     samples;
@@ -349,64 +348,41 @@ struct MusicSample {
 	MusicSample operator- (MusicSample other) { return MusicSample (sample - other.sample, 0); }
 };
 
-/* XXX: slightly unfortunate that there is this and Evoral::Range<>,
-   but this has a uint32_t id which Evoral::Range<> does not.
-*/
-struct AudioRange {
-	samplepos_t start;
-	samplepos_t end;
+/* Just a Temporal::Range with an ID for identity
+ */
+struct TimelineRange : public Temporal::TimeRange
+{
 	uint32_t id;
 
-	AudioRange (samplepos_t s, samplepos_t e, uint32_t i) : start (s), end (e) , id (i) {}
+	TimelineRange (Temporal::timepos_t const & s, Temporal::timepos_t e, uint32_t i) : Temporal::TimeRange (s, e), id (i) {}
 
-	samplecnt_t length() const { return end - start + 1; }
+	samplecnt_t length_samples() const { return length().samples(); }
 
-	bool operator== (const AudioRange& other) const {
-		return start == other.start && end == other.end && id == other.id;
+	bool operator== (const TimelineRange& other) const {
+		return id == other.id && Temporal::TimeRange::operator== (other);
 	}
 
-	bool equal (const AudioRange& other) const {
-		return start == other.start && end == other.end;
-	}
-
-	Evoral::OverlapType coverage (samplepos_t s, samplepos_t e) const {
-		return Evoral::coverage (start, end, s, e);
-	}
-};
-
-struct MusicRange {
-	Timecode::BBT_Time start;
-	Timecode::BBT_Time end;
-	uint32_t id;
-
-	MusicRange (Timecode::BBT_Time& s, Timecode::BBT_Time& e, uint32_t i)
-		: start (s), end (e), id (i) {}
-
-	bool operator== (const MusicRange& other) const {
-		return start == other.start && end == other.end && id == other.id;
-	}
-
-	bool equal (const MusicRange& other) const {
-		return start == other.start && end == other.end;
+	bool equal (const TimelineRange& other) const {
+		return Temporal::TimeRange::operator== (other);
 	}
 };
 
 class CueMarker {
   public:
-	CueMarker (std::string const& text, samplepos_t position) : _text (text), _position (position) {}
+	CueMarker (std::string const& text, timepos_t const & position) : _text (text), _position (position) {}
 
 	std::string text() const { return _text; }
 	void set_text (std::string const & str) { _text = str; }
 
-	samplepos_t position() const { return _position; }
-	void set_position (samplepos_t pos) { _position = pos; }
+	timepos_t position() const { return _position; }
+	void set_position (timepos_t const & pos) { _position = pos; }
 
 	bool operator== (CueMarker const & other) const { return _position == other.position() && _text == other.text(); }
 	bool operator< (CueMarker const & other) const { return _position < other.position(); }
 
   private:
 	std::string _text;
-	samplepos_t _position;
+	timepos_t _position;
 };
 
 typedef std::set<CueMarker> CueMarkers;
@@ -437,9 +413,14 @@ enum MeterHold {
 
 enum EditMode {
 	Slide,
-	Splice,
 	Ripple,
 	Lock
+};
+
+enum RippleMode {
+	RippleSelected,
+	RippleAll,
+	RippleInterview
 };
 
 enum RegionSelectionAfterSplit {
@@ -645,6 +626,7 @@ typedef std::list<samplepos_t> AnalysisFeatureList;
 typedef std::vector<samplepos_t> XrunPositions;
 
 typedef std::list<boost::shared_ptr<Route> > RouteList;
+typedef std::list<boost::shared_ptr<GraphNode> > GraphNodeList;
 typedef std::list<boost::shared_ptr<Stripable> > StripableList;
 typedef std::list<boost::weak_ptr  <Route> > WeakRouteList;
 typedef std::list<boost::weak_ptr  <Stripable> > WeakStripableList;
@@ -656,6 +638,9 @@ typedef std::list<boost::shared_ptr<VCA> > VCAList;
 
 class Bundle;
 typedef std::vector<boost::shared_ptr<Bundle> > BundleList;
+
+class IOPlug;
+typedef std::vector<boost::shared_ptr<IOPlug> > IOPlugList;
 
 enum RegionEquivalence {
 	Exact,
@@ -686,20 +671,19 @@ struct CleanupReport {
 	size_t                   space;
 };
 
-enum PositionLockStyle {
-	AudioTime,
-	MusicTime
-};
-
 /** A struct used to describe changes to processors in a route.
  *  This is useful because objects that respond to a change in processors
  *  can optimise what work they do based on details of what has changed.
+ *
+ *  While the signal themselves are distinct values, the Session
+ *  can accumulate then via ProcessorChangeBlocker and batch process
+ *  them.
  */
 struct RouteProcessorChange {
 	enum Type {
-		GeneralChange = 0x0,
 		MeterPointChange = 0x1,
-		RealTimeChange = 0x2
+		RealTimeChange   = 0x2,
+		GeneralChange    = 0x4
 	};
 
 	RouteProcessorChange () : type (GeneralChange), meter_visibly_changed (true)
@@ -842,7 +826,77 @@ enum LocateTransportDisposition {
 	RollIfAppropriate
 };
 
+enum CueBehavior {
+	FollowCues = 0x1,
+	ImplicitlyIgnoreCues = 0x2
+};
+
 typedef std::vector<CaptureInfo*> CaptureInfos;
+
+const int32_t default_triggers_per_box = 8;
+
+
+struct FollowAction {
+	enum Type {
+		None,
+		Stop,
+		Again,
+		ForwardTrigger, /* any "next" skipping empties */
+		ReverseTrigger, /* any "prev" skipping empties */
+		FirstTrigger,
+		LastTrigger,
+		JumpTrigger,
+	};
+
+	/* We could theoretically limit this to default_triggers_per_box but
+	 * doing it this way makes it likely that this will not change. Could
+	 * be worth a constexpr-style compile time assert to check
+	 * default_triggers_per_box < 64
+	 */
+
+	typedef std::bitset<64> Targets;
+
+	Type type;
+	Targets targets;
+
+	FollowAction () : type (None) {}
+	FollowAction (Type t, Targets const & tgts = Targets()) : type (t), targets (tgts) {}
+	FollowAction (Type t, std::string const & bitstring) : type (t), targets (bitstring) {}
+	FollowAction (std::string const &);
+
+	static Targets target_any () { Targets t; t.set(); return t; }
+	static Targets target_other (uint8_t skip) { Targets t; t.set (); t.reset (skip); return t; }
+	static Targets target_next_wrap (uint8_t from) { Targets t; if (from < t.size() - 1) { t.set (from + 1); } else { t.set (0); } return t; }
+	static Targets target_prev_wrap (uint8_t from) { Targets t; if (from) { t.set (from - 1); } else { t.set (t.size() - 1); } return t; }
+	static Targets target_next_nowrap (uint8_t from) { Targets t; if (from < t.size() - 1) { t.set (from + 1); } return t; }
+	static Targets target_prev_nowrap (uint8_t from) { Targets t; if (from) { t.set (from - 1); } return t; }
+
+	bool operator!= (FollowAction const & other) const {
+		return other.type != type || other.targets != targets;
+	}
+
+	bool operator== (FollowAction const & other) const {
+		return other.type == type && other.targets == targets;
+	}
+
+	bool is_arrangement() {
+		return (
+			(type==ForwardTrigger) ||
+			(type==ReverseTrigger) ||
+			(type==JumpTrigger)    );
+	}
+
+	std::string to_string() const;
+};
+
+struct CueEvent {
+	int32_t cue;
+	samplepos_t time;
+
+	CueEvent (int32_t c, samplepos_t t) : cue (c), time (t) {}
+};
+
+typedef std::vector<CueEvent> CueEvents;
 
 } // namespace ARDOUR
 

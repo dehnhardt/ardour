@@ -29,9 +29,9 @@ using namespace ARDOUR;
 using namespace std;
 
 
-MuteControl::MuteControl (Session& session, std::string const & name, Muteable& m)
+MuteControl::MuteControl (Session& session, std::string const & name, Muteable& m, Temporal::TimeDomain td)
 	: SlavableAutomationControl (session, MuteAutomation, ParameterDescriptor (MuteAutomation),
-	                             boost::shared_ptr<AutomationList> (new AutomationList (Evoral::Parameter (MuteAutomation))),
+	                             boost::shared_ptr<AutomationList> (new AutomationList (Evoral::Parameter (MuteAutomation), td)),
 	                             name)
 	, _muteable (m)
 {
@@ -189,7 +189,7 @@ MuteControl::automation_run (samplepos_t start, pframes_t len)
 	bool mute  = false;
 
 	if (list() && automation_playback()) {
-		mute = list()->rt_safe_eval (start, valid) >= 0.5;
+		mute = list()->rt_safe_eval (timepos_t (start), valid) >= 0.5;
 	}
 
 	if (!valid) {
@@ -198,7 +198,7 @@ MuteControl::automation_run (samplepos_t start, pframes_t len)
 
 	if (muted_by_masters ()) {
 		/* already muted, no need to check further,
-		 * except we need to up update implicit/explict mute
+		 * except we need to up update implicit/explicit mute
 		 */
 		if (muted_by_self () != mute) {
 			set_value_unchecked (mute ? 1. : 0.);

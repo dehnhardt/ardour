@@ -45,14 +45,14 @@ protected:
 	boost::shared_ptr<Playlist> _playlist;
 	PBD::ID                     _original;
 	PBD::ID                     _owner;
-	sampleoffset_t              _playlist_offset;
-	samplecnt_t                 _playlist_length;
+	timepos_t                   _playlist_offset;
+	timepos_t                   _playlist_length;
 
 	PlaylistSource (Session&, const PBD::ID&, const std::string& name, boost::shared_ptr<Playlist>, DataType,
-	                sampleoffset_t begin, samplecnt_t len, Source::Flag flags);
+	                timepos_t const & begin, timepos_t const & len, Source::Flag flags);
 	PlaylistSource (Session&, const XMLNode&);
 
-	void add_state (XMLNode&);
+	void add_state (XMLNode&) const;
 };
 
 } /* namespace */

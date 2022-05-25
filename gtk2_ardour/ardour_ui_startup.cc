@@ -188,7 +188,7 @@ This session was created with a sample rate of %1 Hz, but\n\
 %2 is currently running at %3 Hz.  If you load this session,\n\
 audio may be played at the wrong sample rate.\n"), desired, PROGRAM_NAME, actual));
 
-	image->set_alignment(ALIGN_CENTER, ALIGN_TOP);
+	image->set_alignment(ALIGN_CENTER, ALIGN_START);
 	hbox->pack_start (*image, PACK_EXPAND_WIDGET, 12);
 	hbox->pack_end (message, PACK_EXPAND_PADDING, 12);
 	dialog.get_vbox()->pack_start(*hbox, PACK_EXPAND_PADDING, 6);
@@ -329,6 +329,24 @@ ARDOUR_UI::recorder_settings () const
 }
 
 XMLNode*
+ARDOUR_UI::trigger_page_settings () const
+{
+	XMLNode* node = 0;
+
+	if (_session) {
+		node = _session->instant_xml(X_("TriggerPage"));
+	} else {
+		node = Config->instant_xml(X_("TriggerPage"));
+	}
+
+	if (!node) {
+		node = new XMLNode (X_("TriggerPage"));
+	}
+
+	return node;
+}
+
+XMLNode*
 ARDOUR_UI::keyboard_settings () const
 {
 	XMLNode* node = 0;
@@ -410,7 +428,7 @@ ARDOUR_UI::nsm_init ()
 	 * The wrapper startup script should set the environment variable 'ARDOUR_SELF'
 	 */
 	const char *process_name = g_getenv ("ARDOUR_SELF");
-	nsm->announce (PROGRAM_NAME, ":dirty:", process_name ? process_name : "ardour6");
+	nsm->announce (PROGRAM_NAME, ":dirty:switch:", process_name ? process_name : "ardour7");
 
 	unsigned int i = 0;
 	// wait for announce reply from nsm server
@@ -733,7 +751,9 @@ ARDOUR_UI::load_from_application_api (const std::string& path)
 	}
 
 	if (nsm) {
-		if (!AudioEngine::instance()->set_backend("JACK", "", "")) {
+		unload_session(false, true);
+
+		if (!AudioEngine::instance()->set_backend("JACK", ARDOUR_COMMAND_LINE::backend_client_name, "")) {
 			error << _("NSM: The JACK backend is mandatory and can not be loaded.") << endmsg;
 			return;
 		}
@@ -757,10 +777,13 @@ ARDOUR_UI::load_from_application_api (const std::string& path)
 			}
 		}
 
-		PluginScanDialog psd (true, false);
-		psd.start ();
+		if (!nsm_first_session_opened) {
+			PluginScanDialog psd (true, false);
+			psd.start ();
 
-		post_engine ();
+			post_engine ();
+			nsm_first_session_opened = true;
+		}
 	}
 
 	/* the mechanisms that can result is this being called are only

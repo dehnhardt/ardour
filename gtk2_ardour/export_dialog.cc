@@ -58,8 +58,8 @@ ExportDialog::ExportDialog (PublicEditor & editor, std::string title, ARDOUR::Ex
   : ArdourDialog (title)
   , type (type)
   , editor (editor)
-  , warn_label ("", Gtk::ALIGN_LEFT)
-  , list_files_label (_("<span color=\"#ffa755\">Some already existing files will be overwritten.</span>"), Gtk::ALIGN_RIGHT)
+  , warn_label ("", Gtk::ALIGN_START)
+  , list_files_label (_("<span color=\"#ffa755\">Some already existing files will be overwritten.</span>"), Gtk::ALIGN_END)
   , list_files_button (_("List files"))
   , previous_progress (0)
   , _initialized (false)
@@ -97,7 +97,7 @@ ExportDialog::set_session (ARDOUR::Session* s)
 
 	TimeSelection const & time (editor.get_selection().time);
 	if (!time.empty()) {
-		profile_manager->set_selection_range (time.front().start, time.front().end);
+		profile_manager->set_selection_range (time.front().start().samples(), time.front().end().samples());
 	} else {
 		profile_manager->set_selection_range ();
 	}
@@ -327,7 +327,7 @@ ExportDialog::show_conflicting_files ()
 {
 	ArdourDialog dialog (_("Files that will be overwritten"), true);
 
-	Gtk::Label label ("", Gtk::ALIGN_LEFT);
+	Gtk::Label label ("", Gtk::ALIGN_START);
 	label.set_use_markup (true);
 	label.set_markup (list_files_string);
 
@@ -367,6 +367,12 @@ ExportDialog::do_export ()
 				gui_context()
 				);
 #endif
+
+		_files_to_reimport.clear ();
+		Session::Exported.connect_same_thread (*this, sigc::bind (
+					[] (std::string, std::string fn, bool re, samplepos_t pos, ReImportMap* v) { if (re) { (*v)[pos].push_back (fn); } },
+					&_files_to_reimport));
+
 		handler->do_export ();
 		show_progress ();
 	} catch(std::exception & e) {
@@ -400,6 +406,14 @@ ExportDialog::show_progress ()
 	}
 
 	status->finish (TRS_UI);
+
+	if (!status->aborted() && !_files_to_reimport.empty ()) {
+		for (auto const& x : _files_to_reimport) {
+			timepos_t pos (x.first);
+			Editing::ImportDisposition disposition = Editing::ImportDistinctFiles;
+			editor.do_import (x.second, disposition, Editing::ImportAsTrack, SrcBest, SMFTrackNumber, SMFTempoIgnore, pos);
+		}
+	}
 
 	if (!status->aborted() && UIConfiguration::instance().get_save_export_mixer_screenshot ()) {
 		ExportProfileManager::TimespanStateList const& timespans = profile_manager->get_timespans();
@@ -584,7 +598,7 @@ ExportRegionDialog::init_gui ()
 void
 ExportRegionDialog::init_components ()
 {
-	string loc_id = profile_manager->set_single_range (region.position(), region.position() + region.length(), region.name());
+	string loc_id = profile_manager->set_single_range (region.position_sample(), (region.position() + region.length()).samples(), region.name());
 
 	preset_selector.reset (new ExportPresetSelector ());
 	timespan_selector.reset (new ExportTimespanSelectorSingle (_session, profile_manager, loc_id));

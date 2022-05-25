@@ -71,7 +71,7 @@ EditorSummary::EditorSummary (Editor* e)
 {
 	CairoWidget::use_nsglview ();
 	add_events (Gdk::POINTER_MOTION_MASK|Gdk::KEY_PRESS_MASK|Gdk::KEY_RELEASE_MASK|Gdk::ENTER_NOTIFY_MASK|Gdk::LEAVE_NOTIFY_MASK);
-	set_flags (get_flags() | Gtk::CAN_FOCUS);
+	set_can_focus ();
 
 	UIConfiguration::instance().ParameterChanged.connect (sigc::mem_fun (*this, &EditorSummary::parameter_changed));
 }
@@ -149,9 +149,9 @@ EditorSummary::render_background_image ()
 
 	/* compute start and end points for the summary */
 
-	std::pair<samplepos_t, samplepos_t> ext = _editor->session_gui_extents();
-	double theoretical_start = ext.first;
-	double theoretical_end = ext.second;
+	std::pair<timepos_t, timepos_t> ext = _editor->session_gui_extents();
+	double theoretical_start = ext.first.samples();
+	double theoretical_end = ext.second.samples();
 
 	/* the summary should encompass the full extent of everywhere we've visited since the session was opened */
 	if (_leftmost < theoretical_start)
@@ -337,14 +337,14 @@ EditorSummary::render_region (RegionView* r, cairo_t* cr, double y) const
 	uint32_t const c = r->get_fill_color ();
 	cairo_set_source_rgb (cr, UINT_RGBA_R (c) / 255.0, UINT_RGBA_G (c) / 255.0, UINT_RGBA_B (c) / 255.0);
 
-	if (r->region()->position() > _start) {
-		cairo_move_to (cr, (r->region()->position() - _start) * _x_scale, y);
+	if (r->region()->position_sample() > _start) {
+		cairo_move_to (cr, (r->region()->position_sample() - _start) * _x_scale, y);
 	} else {
 		cairo_move_to (cr, 0, y);
 	}
 
 	if ((r->region()->position() + r->region()->length()) > _start) {
-		cairo_line_to (cr, ((r->region()->position() - _start + r->region()->length())) * _x_scale, y);
+		cairo_line_to (cr, ((r->region()->position_sample() - _start + r->region()->length_samples())) * _x_scale, y);
 	} else {
 		cairo_line_to (cr, 0, y);
 	}
@@ -581,7 +581,7 @@ EditorSummary::get_editor (pair<double, double>* x, pair<double, double>* y) con
 }
 
 /** Get an expression of the position of a point with respect to the view rectangle */
-EditorSummary::Position
+EditorSummary::SummaryPosition
 EditorSummary::get_position (double x, double y) const
 {
 	/* how close the mouse has to be to the edge of the view rectangle to be considered `on it',
@@ -619,7 +619,7 @@ EditorSummary::reset_to_extents()
 
 
 void
-EditorSummary::set_cursor (Position p)
+EditorSummary::set_cursor (SummaryPosition p)
 {
 	switch (p) {
 	case LEFT:
@@ -653,7 +653,7 @@ EditorSummary::summary_zoom_step (int steps /* positive steps to zoom "out" , ne
 
 	/* for now, disallow really close zooming-in from the scroomer. (Currently it
 	 * causes the start-offset to 'walk' because of integer limitations.
-	 * To fix this, probably need to maintain float throught the get/set_editor() path.)
+	 * To fix this, probably need to maintain float through the get/set_editor() path.)
 	 */
 	if (steps<0) {
       if ((xn.second - xn.first) < 2)

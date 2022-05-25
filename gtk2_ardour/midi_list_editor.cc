@@ -26,7 +26,6 @@
 #include "evoral/midi_util.h"
 #include "evoral/Note.h"
 
-#include "ardour/beats_samples_converter.h"
 #include "ardour/midi_model.h"
 #include "ardour/midi_region.h"
 #include "ardour/midi_source.h"
@@ -48,21 +47,21 @@ using namespace Gtk;
 using namespace Gtkmm2ext;
 using namespace Glib;
 using namespace ARDOUR;
-using Timecode::BBT_Time;
+using Temporal::BBT_Time;
 
-static map<int,std::string> note_length_map;
+static map<int32_t,std::string> note_length_map;
 
 static void
 fill_note_length_map ()
 {
-	note_length_map.insert (make_pair<int,string> (BBT_Time::ticks_per_beat, _("Whole")));
-	note_length_map.insert (make_pair<int,string> (BBT_Time::ticks_per_beat/2, _("Half")));
-	note_length_map.insert (make_pair<int,string> (BBT_Time::ticks_per_beat/3, _("Triplet")));
-	note_length_map.insert (make_pair<int,string> (BBT_Time::ticks_per_beat/4, _("Quarter")));
-	note_length_map.insert (make_pair<int,string> (BBT_Time::ticks_per_beat/8, _("Eighth")));
-	note_length_map.insert (make_pair<int,string> (BBT_Time::ticks_per_beat/16, _("Sixteenth")));
-	note_length_map.insert (make_pair<int,string> (BBT_Time::ticks_per_beat/32, _("Thirty-second")));
-	note_length_map.insert (make_pair<int,string> (BBT_Time::ticks_per_beat/64, _("Sixty-fourth")));
+	note_length_map.insert (make_pair<int32_t,string> (Temporal::ticks_per_beat/1, _("Whole")));
+	note_length_map.insert (make_pair<int32_t,string> (Temporal::ticks_per_beat/2, _("Half")));
+	note_length_map.insert (make_pair<int32_t,string> (Temporal::ticks_per_beat/3, _("Triplet")));
+	note_length_map.insert (make_pair<int32_t,string> (Temporal::ticks_per_beat/4, _("Quarter")));
+	note_length_map.insert (make_pair<int32_t,string> (Temporal::ticks_per_beat/8, _("Eighth")));
+	note_length_map.insert (make_pair<int32_t,string> (Temporal::ticks_per_beat/16, _("Sixteenth")));
+	note_length_map.insert (make_pair<int32_t,string> (Temporal::ticks_per_beat/32, _("Thirty-second")));
+	note_length_map.insert (make_pair<int32_t,string> (Temporal::ticks_per_beat/64, _("Sixty-fourth")));
 }
 
 MidiListEditor::MidiListEditor (Session* s, boost::shared_ptr<MidiRegion> r, boost::shared_ptr<MidiTrack> tr)
@@ -186,7 +185,7 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 	int cellx;
 	int celly;
 	int idelta = 0;
-	double fdelta = 0;
+	Temporal::Beats beat_delta;
 	MidiModel::NoteDiffCommand::Property prop (MidiModel::NoteDiffCommand::NoteNumber);
 	bool apply = false;
 	bool was_selected = false;
@@ -209,12 +208,12 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 	switch (colnum) {
 	case 0:
 		if (Keyboard::modifier_state_equals (ev->state, Keyboard::SecondaryModifier)) {
-			fdelta = 1/64.0;
+			beat_delta = Temporal::Beats::ticks (Temporal::ticks_per_beat / 64);
 		} else {
-			fdelta = 1/4.0;
+			beat_delta = Temporal::Beats (1, 0);
 		}
 		if (ev->direction == GDK_SCROLL_DOWN || ev->direction == GDK_SCROLL_LEFT) {
-			fdelta = -fdelta;
+			beat_delta = beat_delta;
 		}
 		prop = MidiModel::NoteDiffCommand::StartTime;
 		opname = _("edit note start");
@@ -252,12 +251,12 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 
 	case 5:
 		if (Keyboard::modifier_state_equals (ev->state, Keyboard::SecondaryModifier)) {
-			fdelta = 1/64.0;
+			beat_delta = Temporal::Beats::ticks (Temporal::ticks_per_beat / 64);
 		} else {
-			fdelta = 1/4.0;
+			beat_delta = Temporal::Beats (1, 0);
 		}
 		if (ev->direction == GDK_SCROLL_DOWN || ev->direction == GDK_SCROLL_LEFT) {
-			fdelta = -fdelta;
+			beat_delta = -beat_delta;
 		}
 		prop = MidiModel::NoteDiffCommand::Length;
 		opname = _("edit note length");
@@ -293,8 +292,8 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 
 					switch (prop) {
 					case MidiModel::NoteDiffCommand::StartTime:
-						if (note->time() + fdelta >= 0) {
-							cmd->change (note, prop, note->time() + fdelta);
+						if (note->time() + beat_delta >= Temporal::Beats()) {
+							cmd->change (note, prop, note->time() + beat_delta);
 						} else {
 							cmd->change (note, prop, Temporal::Beats());
 						}
@@ -303,11 +302,10 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 						cmd->change (note, prop, (uint8_t) (note->velocity() + idelta));
 						break;
 					case MidiModel::NoteDiffCommand::Length:
-						if (note->length().to_double() + fdelta >=
-						    Temporal::Beats::tick().to_double()) {
-							cmd->change (note, prop, note->length() + fdelta);
+						if (note->length() + beat_delta >= Temporal::Beats::one_tick()) {
+							cmd->change (note, prop, note->length() + beat_delta);
 						} else {
-							cmd->change (note, prop, Temporal::Beats::tick());
+							cmd->change (note, prop, Temporal::Beats::one_tick());
 						}
 						break;
 					case MidiModel::NoteDiffCommand::Channel:
@@ -336,8 +334,8 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 
 				switch (prop) {
 				case MidiModel::NoteDiffCommand::StartTime:
-					if (note->time() + fdelta >= 0) {
-						cmd->change (note, prop, note->time() + fdelta);
+					if (note->time() + beat_delta >= Temporal::Beats()) {
+						cmd->change (note, prop, note->time() + beat_delta);
 					} else {
 						cmd->change (note, prop, Temporal::Beats());
 					}
@@ -346,11 +344,10 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 					cmd->change (note, prop, (uint8_t) (note->velocity() + idelta));
 					break;
 				case MidiModel::NoteDiffCommand::Length:
-					if (note->length() + fdelta >=
-					    Temporal::Beats::tick().to_double()) {
-						cmd->change (note, prop, note->length() + fdelta);
+					if (note->length() + beat_delta >= Temporal::Beats::one_tick()) {
+						cmd->change (note, prop, note->length() + beat_delta);
 					} else {
-						cmd->change (note, prop, Temporal::Beats::tick());
+						cmd->change (note, prop, Temporal::Beats::one_tick());
 					}
 					break;
 				case MidiModel::NoteDiffCommand::Channel:
@@ -365,7 +362,7 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 			}
 		}
 
-		m->apply_command (*_session, cmd);
+		m->apply_diff_command_as_commit (*_session, cmd);
 
 		/* reset selection to be as it was before we rebuilt */
 
@@ -468,7 +465,7 @@ MidiListEditor::key_release (GdkEventKey* ev)
 		note = (*iter)[columns._note];
 		copy.reset (new NoteType (*note.get()));
 		cmd->add (copy);
-		m->apply_command (*_session, cmd);
+		m->apply_diff_command_as_commit (*_session, cmd);
 		/* model has been redisplayed by now */
 		path.next ();
 		/* select, start editing column 2 (note) */
@@ -534,7 +531,7 @@ MidiListEditor::delete_selected_note ()
 		cmd->remove (*i);
 	}
 
-	m->apply_command (*_session, cmd);
+	m->apply_diff_command_as_commit (*_session, cmd);
 }
 
 void
@@ -589,11 +586,11 @@ MidiListEditor::edited (const std::string& path, const std::string& text)
 	boost::shared_ptr<NoteType> note = (*iter)[columns._note];
 	MidiModel::NoteDiffCommand::Property prop (MidiModel::NoteDiffCommand::NoteNumber);
 
-	double fval;
+	Temporal::Beats  bval;
 	int    ival;
 	bool   apply = false;
 	int    idelta = 0;
-	double fdelta = 0;
+	Temporal::Beats delta;
 	char const * opname;
 	switch (edit_column) {
 	case 0: // start
@@ -634,18 +631,12 @@ MidiListEditor::edited (const std::string& path, const std::string& text)
 		break;
 	case 5: // length
 
-		if (sscanf (text.c_str(), "%lf", &fval) == 1) {
 
-			/* numeric value entered */
+		try {
+			stringstream ss (text);
+			ss >> bval;
 
-			if (text.find ('.') == string::npos && text.find (',') == string::npos) {
-				/* integral => units are ticks */
-				fval = fval / BBT_Time::ticks_per_beat;
-			} else {
-				/* non-integral => beats, so use as-is */
-			}
-
-		} else {
+		} catch (...) {
 
 			/* assume its text from the combo. look for the map
 			 * entry for the actual note ticks
@@ -668,12 +659,12 @@ MidiListEditor::edited (const std::string& path, const std::string& text)
 				}
 
 				if (x != note_length_map.end()) {
-					fval = x->first / BBT_Time::ticks_per_beat;
+					bval = x->first / Temporal::ticks_per_beat;
 				}
 
 			} else {
 
-				fval = -1.0;
+				bval = Temporal::Beats();
 
 				if (text != x->second) {
 
@@ -689,14 +680,14 @@ MidiListEditor::edited (const std::string& path, const std::string& text)
 
 					if (x != note_length_map.end()) {
 						/* convert to beats */
-						fval = (double) x->first / BBT_Time::ticks_per_beat;
+						bval = x->first / Temporal::ticks_per_beat;
 					}
 				}
 			}
 		}
 
-		if (fval > 0.0) {
-			fdelta = fval - note->length().to_double();
+		if (bval) {
+			delta = bval - note->length();
 			prop = MidiModel::NoteDiffCommand::Length;
 			opname = _("change note length");
 			apply = true;
@@ -724,7 +715,7 @@ MidiListEditor::edited (const std::string& path, const std::string& text)
 					cmd->change (note, prop, (uint8_t) (note->velocity() + idelta));
 					break;
 				case MidiModel::NoteDiffCommand::Length:
-					cmd->change (note, prop, note->length() + fdelta);
+					cmd->change (note, prop, note->length() + delta);
 					break;
 				case MidiModel::NoteDiffCommand::Channel:
 					cmd->change (note, prop, (uint8_t) (note->channel() + idelta));
@@ -738,7 +729,7 @@ MidiListEditor::edited (const std::string& path, const std::string& text)
 			}
 		}
 
-		m->apply_command (*_session, cmd);
+		m->apply_diff_command_as_commit (*_session, cmd);
 
 		/* model has been redisplayed by now */
 		/* keep selected row(s), move cursor there, don't continue editing */
@@ -763,13 +754,13 @@ MidiListEditor::redisplay_model ()
 
 	if (_session) {
 
-		BeatsSamplesConverter conv (_session->tempo_map(), region->position());
 		boost::shared_ptr<MidiModel> m (region->midi_source(0)->model());
 		TreeModel::Row row;
 		stringstream ss;
 
-		MidiModel::Notes::const_iterator i = m->note_lower_bound(conv.from (region->start()));
-		Temporal::Beats end_time = conv.from (region->start()) + conv.from (region->length());
+		MidiModel::Notes::const_iterator i = m->note_lower_bound (region->start().beats());
+		Temporal::Beats end_time = (region->start() + region->length()).beats();
+
 		for (; i != m->notes().end() && (*i)->time() < end_time; ++i) {
 			row = *(model->append());
 			row[columns.channel] = (*i)->channel() + 1;
@@ -777,7 +768,7 @@ MidiListEditor::redisplay_model ()
 			row[columns.note] = (*i)->note();
 			row[columns.velocity] = (*i)->velocity();
 
-			Timecode::BBT_Time bbt (_session->tempo_map().bbt_at_sample (region->position() - region->start() + conv.to ((*i)->time())));
+			Temporal::BBT_Time bbt = Temporal::TempoMap::use()->bbt_at ((region->position() + timepos_t ((*i)->time())).earlier (region->start()));
 
 			ss.str ("");
 			ss << bbt;

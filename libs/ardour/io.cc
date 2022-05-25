@@ -63,8 +63,6 @@ using namespace ARDOUR;
 using namespace PBD;
 
 const string                 IO::state_node_name = "IO";
-bool                         IO::connecting_legal = false;
-PBD::Signal0<int>            IO::ConnectingLegal;
 PBD::Signal1<void,ChanCount> IO::PortCountChanged;
 
 /** @param default_type The type of port that will be created by ensure_io
@@ -77,7 +75,6 @@ IO::IO (Session& s, const string& name, Direction dir, DataType default_type, bo
 	, _sendish (sendish)
 {
 	_active = true;
-	pending_state_node = 0;
 	setup_bundle ();
 }
 
@@ -88,7 +85,6 @@ IO::IO (Session& s, const XMLNode& node, DataType dt, bool sendish)
 	, _sendish (sendish)
 {
 	_active = true;
-	pending_state_node = 0;
 
 	set_state (node, Stateful::loading_state_version);
 	setup_bundle ();
@@ -105,7 +101,6 @@ IO::~IO ()
 	for (PortSet::iterator i = _ports.begin(); i != _ports.end(); ++i) {
 		_session.engine().unregister_port (*i);
 	}
-	delete pending_state_node; pending_state_node = 0;
 }
 
 void
@@ -524,13 +519,13 @@ IO::ensure_io (ChanCount count, bool clear, void* src)
 }
 
 XMLNode&
-IO::get_state ()
+IO::get_state () const
 {
 	return state ();
 }
 
 XMLNode&
-IO::state ()
+IO::state () const
 {
 	XMLNode* node = new XMLNode (state_node_name);
 	int n;
@@ -545,7 +540,7 @@ IO::state ()
 		node->set_property("pretty-name", _pretty_name_prefix);
 	}
 
-	for (PortSet::iterator i = _ports.begin(); i != _ports.end(); ++i) {
+	for (PortSet::const_iterator i = _ports.begin(); i != _ports.end(); ++i) {
 
 		vector<string> connections;
 
@@ -614,6 +609,7 @@ IO::set_state (const XMLNode& node, int version)
 	if (create_ports (node, version)) {
 		return -1;
 	}
+
 	if (_sendish && _direction == Output) {
 		/* ignore <Port name="...">  from XML for sends, but use the names
 		 * ::ensure_ports_locked() creates port using ::build_legal_port_name()
@@ -631,23 +627,37 @@ IO::set_state (const XMLNode& node, int version)
 	}
 
 	// after create_ports, updates names
+
 	if (node.get_property ("pretty-name", name)) {
 		set_pretty_name (name);
 	}
 
-	if (connecting_legal) {
+	/* now set port state (this will *not* connect them, but will store
+	   the names of connected ports).
+	 */
 
-		if (make_connections (node, version, false)) {
-			return -1;
+	if (version < 3000) {
+		return set_port_state_2X (node, version, false);
+	}
+
+	XMLProperty const * prop;
+
+	for (XMLNodeConstIterator i = node.children().begin(); i != node.children().end(); ++i) {
+
+		if ((*i)->name() == "Port") {
+
+			prop = (*i)->property (X_("name"));
+
+			if (!prop) {
+				continue;
+			}
+
+			boost::shared_ptr<Port> p = port_by_name (prop->value());
+
+			if (p) {
+				p->set_state (**i, version);
+			}
 		}
-
-	} else {
-
-		delete pending_state_node;
-		pending_state_node = new XMLNode (node);
-		pending_state_node_version = version;
-		pending_state_node_in = false;
-		ConnectingLegal.connect_same_thread (connection_legal_c, boost::bind (&IO::connecting_became_legal, this));
 	}
 
 	return 0;
@@ -685,39 +695,11 @@ IO::set_state_2X (const XMLNode& node, int version, bool in)
 		return -1;
 	}
 
-	if (connecting_legal) {
-
-		if (make_connections_2X (node, version, in)) {
-			return -1;
-		}
-
-	} else {
-
-		delete pending_state_node;
-		pending_state_node = new XMLNode (node);
-		pending_state_node_version = version;
-		pending_state_node_in = in;
-		ConnectingLegal.connect_same_thread (connection_legal_c, boost::bind (&IO::connecting_became_legal, this));
+	if (set_port_state_2X (node, version, in)) {
+		return -1;
 	}
 
 	return 0;
-}
-
-int
-IO::connecting_became_legal ()
-{
-	int ret = 0;
-
-	assert (pending_state_node);
-
-	connection_legal_c.disconnect ();
-
-	ret = make_connections (*pending_state_node, pending_state_node_version, pending_state_node_in);
-
-	delete pending_state_node;
-	pending_state_node = 0;
-
-	return ret;
 }
 
 boost::shared_ptr<Bundle>
@@ -915,103 +897,7 @@ IO::create_ports (const XMLNode& node, int version)
 }
 
 int
-IO::make_connections (const XMLNode& node, int version, bool in)
-{
-	if (version < 3000) {
-		return make_connections_2X (node, version, in);
-	}
-
-	XMLProperty const * prop;
-
-	for (XMLNodeConstIterator i = node.children().begin(); i != node.children().end(); ++i) {
-
-		if ((*i)->name() == "Bundle") {
-			XMLProperty const * prop = (*i)->property ("name");
-			if (prop) {
-				boost::shared_ptr<Bundle> b = find_possible_bundle (prop->value());
-				if (b) {
-					connect_ports_to_bundle (b, true, this);
-				}
-			}
-
-			return 0;
-		}
-
-		if ((*i)->name() == "Port") {
-
-			prop = (*i)->property (X_("name"));
-
-			if (!prop) {
-				continue;
-			}
-
-			boost::shared_ptr<Port> p = port_by_name (prop->value());
-
-			if (p) {
-				for (XMLNodeConstIterator c = (*i)->children().begin(); c != (*i)->children().end(); ++c) {
-
-					XMLNode* cnode = (*c);
-
-					if (cnode->name() != X_("Connection")) {
-						continue;
-					}
-
-					if ((prop = cnode->property (X_("other"))) == 0) {
-						continue;
-					}
-
-					if (prop) {
-						connect (p, prop->value(), this);
-					}
-				}
-			}
-		}
-	}
-
-	return 0;
-}
-
-void
-IO::prepare_for_reset (XMLNode& node, const std::string& name)
-{
-	/* reset name */
-	node.set_property ("name", name);
-
-	/* now find connections and reset the name of the port
-	   in one so that when we re-use it it will match
-	   the name of the thing we're applying it to.
-	*/
-
-	XMLProperty * prop;
-	XMLNodeList children = node.children();
-
-	for (XMLNodeIterator i = children.begin(); i != children.end(); ++i) {
-
-		if ((*i)->name() == "Port") {
-
-			prop = (*i)->property (X_("name"));
-
-			if (prop) {
-				string new_name;
-				string old = prop->value();
-				string::size_type slash = old.find ('/');
-
-				if (slash != string::npos) {
-					/* port name is of form: <IO-name>/<port-name> */
-
-					new_name = name;
-					new_name += old.substr (old.find ('/'));
-
-					prop->set_value (new_name);
-				}
-			}
-		}
-	}
-}
-
-
-int
-IO::make_connections_2X (const XMLNode& node, int /*version*/, bool in)
+IO::set_port_state_2X (const XMLNode& node, int /*version*/, bool in)
 {
 	XMLProperty const * prop;
 
@@ -1105,6 +991,46 @@ IO::make_connections_2X (const XMLNode& node, int /*version*/, bool in)
 
 	return 0;
 }
+
+void
+IO::prepare_for_reset (XMLNode& node, const std::string& name)
+{
+	/* reset name */
+	node.set_property ("name", name);
+
+	/* now find connections and reset the name of the port
+	   in one so that when we re-use it it will match
+	   the name of the thing we're applying it to.
+	*/
+
+	XMLProperty * prop;
+	XMLNodeList children = node.children();
+
+	for (XMLNodeIterator i = children.begin(); i != children.end(); ++i) {
+
+		if ((*i)->name() == "Port") {
+
+			prop = (*i)->property (X_("name"));
+
+			if (prop) {
+				string new_name;
+				string old = prop->value();
+				string::size_type slash = old.find ('/');
+
+				if (slash != string::npos) {
+					/* port name is of form: <IO-name>/<port-name> */
+
+					new_name = name;
+					new_name += old.substr (old.find ('/'));
+
+					prop->set_value (new_name);
+				}
+			}
+		}
+	}
+}
+
+
 
 int
 IO::set_ports (const string& str)
@@ -1215,6 +1141,7 @@ IO::set_name (const string& requested_name)
 
 	for (PortSet::iterator i = _ports.begin(); i != _ports.end(); ++i) {
 		string current_name = i->name();
+		assert (current_name.find (_name) != std::string::npos);
 		current_name.replace (current_name.find (_name), _name.val().length(), name);
 		i->set_name (current_name);
 	}
@@ -1258,6 +1185,33 @@ IO::set_private_port_latencies (samplecnt_t value, bool playback)
 	lat.min = lat.max = value;
 	for (PortSet::iterator i = _ports.begin (); i != _ports.end(); ++i) {
 		 i->set_private_latency_range (lat, playback);
+	}
+}
+
+void
+IO::set_public_port_latency_from_connections () const
+{
+	/* get min/max of connected up/downstream ports */
+	bool connected = false;
+	bool playback = _direction == Output;
+	LatencyRange lr;
+	lr.min = ~((pframes_t) 0);
+	lr.max = 0;
+
+	for (PortSet::const_iterator i = _ports.begin(); i != _ports.end(); ++i) {
+		if (i->connected()) {
+			connected = true;
+		}
+		i->collect_latency_from_backend (lr, playback);
+	}
+
+	if (!connected) {
+		/* if output is not connected to anything, use private latency */
+		lr.min = lr.max = latency ();
+	}
+
+	for (PortSet::const_iterator i = _ports.begin (); i != _ports.end(); ++i) {
+		 i->set_public_latency_range (lr, playback);
 	}
 }
 
@@ -1396,23 +1350,6 @@ IO::disconnect_ports_from_bundle (boost::shared_ptr<Bundle> c, void* src)
 
 	changed (IOChange (IOChange::ConnectionsChanged), src); /* EMIT SIGNAL */
 	return 0;
-}
-
-
-int
-IO::disable_connecting ()
-{
-	connecting_legal = false;
-	return 0;
-}
-
-int
-IO::enable_connecting ()
-{
-	Glib::Threads::Mutex::Lock lm (AudioEngine::instance()->process_lock());
-	connecting_legal = true;
-	boost::optional<int> r = ConnectingLegal ();
-	return r.value_or (0);
 }
 
 void
@@ -1687,10 +1624,10 @@ IO::connected_to (boost::shared_ptr<const IO> other) const
 
 	for (i = 0; i < no; ++i) {
 		for (j = 0; j < ni; ++j) {
-			if ((NULL != nth(i).get()) && (NULL != other->nth(j).get())) {
-				if (nth(i)->connected_to (other->nth(j)->name())) {
-					return true;
-				}
+			boost::shared_ptr<Port> pa (nth(i));
+			boost::shared_ptr<Port> pb (other->nth(j));
+			if (pa && pb && pa->connected_to (pb->name())) {
+				return true;
 			}
 		}
 	}

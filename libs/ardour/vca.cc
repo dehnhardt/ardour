@@ -79,8 +79,8 @@ VCA::VCA (Session& s, int32_t num, const string& name)
 int
 VCA::init ()
 {
-	_solo_control.reset (new SoloControl (_session, X_("solo"), *this, *this));
-	_mute_control.reset (new MuteControl (_session, X_("mute"), *this));
+	_solo_control.reset (new SoloControl (_session, X_("solo"), *this, *this, time_domain()));
+	_mute_control.reset (new MuteControl (_session, X_("mute"), *this, time_domain()));
 
 	add_control (_gain_control);
 	add_control (_solo_control);
@@ -117,7 +117,7 @@ VCA::full_name() const
 }
 
 XMLNode&
-VCA::get_state ()
+VCA::get_state () const
 {
 	XMLNode* node = new XMLNode (xml_node_name);
 	node->set_property (X_("name"), name());

@@ -159,7 +159,7 @@ public:
 		HeightPerLane
 	};
 
-	virtual void set_height (uint32_t h, TrackHeightMode m = OnlySelf);
+	virtual void set_height (uint32_t h, TrackHeightMode m = OnlySelf, bool from_idle = false);
 	void set_height_enum (Height, bool apply_to_selection = false);
 	void reset_height();
 
@@ -177,7 +177,7 @@ public:
 	virtual void show_selection (TimeSelection&);
 	virtual void hide_selection ();
 	virtual void reshow_selection (TimeSelection&);
-	virtual void show_timestretch (samplepos_t start, samplepos_t end, int layers, int layer);
+	virtual void show_timestretch (Temporal::timepos_t const & start, Temporal::timepos_t const & end, int layers, int layer);
 	virtual void hide_timestretch ();
 
 	/* editing operations */
@@ -190,10 +190,9 @@ public:
 	 *  @param ctx Paste context.
 	 *  @param sub_num music-time sub-division: \c -1: snap to bar, \c 1: exact beat, \c >1: \c (1 \c / \p sub_num \c ) beat-divisions
 	 */
-	virtual bool paste (ARDOUR::samplepos_t pos,
+	virtual bool paste (Temporal::timepos_t const & pos,
 	                    const Selection&    selection,
-	                    PasteContext&       ctx,
-	                    const int32_t sub_num)
+	                    PasteContext&       ctx)
 	{
 		return false;
 	}
@@ -204,14 +203,15 @@ public:
 
 	virtual void fade_range (TimeSelection&) {}
 
-	virtual boost::shared_ptr<ARDOUR::Region> find_next_region (samplepos_t /*pos*/, ARDOUR::RegionPoint, int32_t /*dir*/) {
+	virtual boost::shared_ptr<ARDOUR::Region> find_next_region (ARDOUR::timepos_t const & /*pos*/, ARDOUR::RegionPoint, int32_t /*dir*/) {
 		return boost::shared_ptr<ARDOUR::Region> ();
 	}
 
 	void order_selection_trims (ArdourCanvas::Item *item, bool put_start_on_top);
 
-	virtual void get_selectables (ARDOUR::samplepos_t, ARDOUR::samplepos_t, double, double, std::list<Selectable*>&, bool within = false);
+	virtual void get_selectables (Temporal::timepos_t const &, Temporal::timepos_t  const &, double, double, std::list<Selectable*>&, bool within = false);
 	virtual void get_inverted_selectables (Selection&, std::list<Selectable *>& results);
+	virtual void get_regionviews_at_or_after (Temporal::timepos_t const &, RegionSelection&) {}
 
 	void add_ghost (RegionView*);
 	void remove_ghost (RegionView*);
@@ -275,7 +275,7 @@ protected:
 
 	virtual bool name_entry_changed (std::string const&);
 
-	/** Handle mouse relaese on our LHS control name ebox.
+	/** Handle mouse release on our LHS control name ebox.
 	 *
 	 *@ param ev the event
 	 */

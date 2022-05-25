@@ -104,6 +104,10 @@ class LIBARDOUR_API BackendPort : public ProtoPort
 
 	void update_connected_latency (bool for_playback);
 
+	bool operator< (BackendPort const& rhs) const {
+		return PBD::naturally_less (name ().c_str (), rhs.name ().c_str ());
+	}
+
 protected:
 	PortEngineSharedImpl& _backend;
 
@@ -120,6 +124,16 @@ private:
 	void remove_connection (BackendPortHandle);
 
 }; // class BackendPort
+
+class LIBARDOUR_API BackendMIDIEvent
+{
+public:
+	virtual ~BackendMIDIEvent () {}
+	virtual size_t size () const = 0;
+	virtual pframes_t timestamp () const = 0;
+	virtual const uint8_t* data () const = 0;
+	bool operator< (const BackendMIDIEvent &other) const;
+};
 
 class LIBARDOUR_API PortEngineSharedImpl
 {
@@ -205,7 +219,7 @@ protected:
 
 	struct SortByPortName {
 		bool operator() (BackendPortHandle lhs, BackendPortHandle rhs) const {
-			return PBD::naturally_less (lhs->name ().c_str (), rhs->name ().c_str ());
+			return *lhs < *rhs;
 		}
 	};
 
@@ -216,7 +230,7 @@ protected:
 
 	bool valid_port (BackendPortHandle port) const {
 		boost::shared_ptr<PortIndex> p = _ports.reader ();
-		return std::find (p->begin (), p->end (), port) != p->end ();
+		return p->find (port) != p->end ();
 	}
 
 	BackendPortPtr find_port (const std::string& port_name) const {

@@ -40,6 +40,7 @@ namespace ArdourCanvas
 
 class Canvas;
 class ScrollGroup;
+class ConstrainedItem;
 
 /** The parent class for anything that goes on the canvas.
  *
@@ -145,17 +146,25 @@ public:
 
 	ScrollGroup* scroll_parent() const { return _scroll_parent; }
 
-	/* item implementations can override this if they need to */
-	virtual Rect size_request() const { return bounding_box (true); }
-	void size_allocate (Rect const&);
+	/* layout-related methods */
 
-	/** bounding box is the public API to get the size of the item.
-	 * If @param for_own_purposes is false, then it will return the
-	 * allocated bounding box (if there is one) in preference to the
-	 * one that would naturally be computed by the item.
-	 */
-	Rect bounding_box (bool for_own_purposes = false) const;
+	virtual void size_request (double& w, double& h) const;
+	void set_size_request (double w, double h);
+	void set_size_request_to_display_given_text (const std::vector<std::string>& strings, gint hpadding, gint vpadding);
+
+	void size_allocate (Rect const&);
+	virtual void _size_allocate (Rect const&);
+	virtual void size_allocate_children (Rect const & r);
 	Rect allocation() const { return _allocation; }
+	void set_layout_sensitive (bool);
+	bool layout_sensitive () const { return _layout_sensitive; }
+
+	/** bounding box is the public API to get the area covered by the item
+	 * (which may differ from its allocation). The returned Rect is in item
+	 * coordinates (i.e. x0,y0 = 0,0 mean that the upper left corner of the
+	 * bounding box is at the item's _position).
+	 */
+	Rect bounding_box () const;
 
 	Coord height() const;
 	Coord width() const;
@@ -211,17 +220,23 @@ public:
 	void* get_data (std::string const &) const;
 
 	/* nested item ("grouping") API */
-	void add (Item *);
-	void add_front (Item *);
-	void remove (Item *);
+	virtual void add (Item *);
+	virtual void add_front (Item *);
+	virtual void remove (Item *);
+	/* XXX this should become virtual also */
 	void clear (bool with_delete = false);
+
 	std::list<Item*> const & items () const {
 		return _items;
 	}
+
 	void raise_child_to_top (Item *);
 	void raise_child (Item *, int);
 	void lower_child_to_bottom (Item *);
-	virtual void child_changed ();
+	virtual void child_changed (bool bbox_changed);
+
+	PackOptions pack_options () const { return _pack_options; }
+	void set_pack_options (PackOptions);
 
 	static int default_items_per_cell;
 
@@ -249,6 +264,9 @@ public:
 
 #ifdef CANVAS_DEBUG
 	std::string name;
+	std::string whoami() const { return whatami() + '/' + name; }
+#else
+	std::string whoami() const { return whatami(); }
 #endif
 
 #ifdef CANVAS_COMPATIBILITY
@@ -264,7 +282,23 @@ public:
 	virtual void dump (std::ostream&) const;
 	std::string whatami() const;
 
-protected:
+        bool resize_queued() const { return _resize_queued; }
+        void queue_resize();
+
+	bool scroll_translation() const { return _scroll_translation; }
+	void disable_scroll_translation ();
+
+        /* only derived containers need to implement this, but this
+           is where they compute the sizes and position and their
+           children. A fixed-layout container (i.e. one where every child
+           has just had its position fixed via ::set_position()) does not
+           need to do anything here. Only box/table/grid style containers,
+           where the position of one child depends on the position and size of
+           other children, need to provide an implementation.
+        */
+        virtual void layout();
+
+  protected:
 	friend class Fill;
 	friend class Outline;
 
@@ -299,9 +333,14 @@ protected:
 
 	/** our bounding box; may be out of date if _bounding_box_dirty is true */
 	mutable Rect _bounding_box;
-	/** true if _bounding_box might be out of date, false if its definitely not */
-	mutable bool _bounding_box_dirty;
+	PackOptions _pack_options;
+
+	void set_bbox_clean () const;
+	void set_bbox_dirty () const;
+	bool bbox_dirty() const { return _bounding_box_dirty; }
+
 	Rect _allocation;
+	bool _layout_sensitive;
 
 	/* XXX: this is a bit grubby */
 	std::map<std::string, void *> _data;
@@ -321,13 +360,21 @@ protected:
 	void prepare_for_render_children (Rect const & area) const;
 
 	Duple scroll_offset() const;
+  public:
 	Duple position_offset() const;
+
+	bool _resize_queued;
+	double _requested_width;
+	double _requested_height;
 
 private:
 	void init ();
 
 	std::string _tooltip;
 	bool _ignore_events;
+	bool _scroll_translation;
+	/** true if _bounding_box might be out of date, false if its definitely not */
+	mutable bool _bounding_box_dirty;
 
 	void find_scroll_parent ();
 	void propagate_show_hide ();

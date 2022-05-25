@@ -606,7 +606,7 @@ GenericMidiControlProtocol::check_used_event (int pos, int control_number)
 }
 
 XMLNode&
-GenericMidiControlProtocol::get_state ()
+GenericMidiControlProtocol::get_state () const
 {
 	XMLNode& node (ControlProtocol::get_state());
 
@@ -634,15 +634,15 @@ GenericMidiControlProtocol::get_state ()
 	node.add_child_nocopy (*children);
 
 	Glib::Threads::Mutex::Lock lm2 (controllables_lock);
-	for (MIDIControllables::iterator i = controllables.begin(); i != controllables.end(); ++i) {
+	for (auto const & c : controllables) {
 
 		/* we don't care about bindings that come from a bindings map, because
 		   they will all be reset/recreated when we load the relevant bindings
 		   file.
 		*/
 
-		if ((*i)->get_controllable() && (*i)->learned()) {
-			children->add_child_nocopy ((*i)->get_state());
+		if (c->get_controllable() && c->learned()) {
+			children->add_child_nocopy (c->get_state());
 		}
 	}
 
@@ -1611,7 +1611,7 @@ GenericMidiControlProtocol::maybe_start_touch (boost::shared_ptr<Controllable> c
 {
 	boost::shared_ptr<AutomationControl> actl = boost::dynamic_pointer_cast<AutomationControl> (controllable);
 	if (actl) {
-		actl->start_touch (session->audible_sample ());
+		actl->start_touch (timepos_t (session->audible_sample ()));
 	}
 }
 

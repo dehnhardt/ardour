@@ -129,7 +129,7 @@ Strip::Strip (Surface& s, const std::string& name, int index, const map<Button::
 
 		// The main unit has 9 faders under the second display.
 		// Extenders have 8 faders.
-		if (s.mcp().device_info().has_master_fader()) {
+		if (s.number() == s.mcp().device_info().master_position()) {
 			_lcd2_label_pitch = 6;
 		}
 	}
@@ -389,6 +389,10 @@ Strip::notify_processor_changed (bool force_update)
 void
 Strip::notify_property_changed (const PropertyChange& what_changed)
 {
+	if (!_stripable) {
+		return;
+	}
+
 	if (what_changed.contains (ARDOUR::Properties::name)) {
 		show_stripable_name ();
 	}
@@ -597,7 +601,7 @@ Strip::fader_touch_event (Button&, ButtonState bs)
 		boost::shared_ptr<AutomationControl> ac = _fader->control ();
 
 		_fader->set_in_use (true);
-		_fader->start_touch (_surface->mcp().transport_sample());
+		_fader->start_touch (timepos_t (_surface->mcp().transport_sample()));
 
 		if (ac) {
 			do_parameter_display (ac->desc(), ac->get_value());
@@ -606,7 +610,7 @@ Strip::fader_touch_event (Button&, ButtonState bs)
 	} else {
 
 		_fader->set_in_use (false);
-		_fader->stop_touch (_surface->mcp().transport_sample());
+		_fader->stop_touch (timepos_t (_surface->mcp().transport_sample()));
 
 	}
 }
@@ -682,7 +686,7 @@ Strip::handle_button (Button& button, ButtonState bs)
 }
 
 std::string
-Strip::format_paramater_for_display(
+Strip::format_parameter_for_display(
 		ARDOUR::ParameterDescriptor const& desc,
 		float val,
 		boost::shared_ptr<ARDOUR::Stripable> stripable_for_non_mixbus_azimuth_automation,
@@ -736,7 +740,7 @@ Strip::format_paramater_for_display(
 void
 Strip::do_parameter_display (ARDOUR::ParameterDescriptor const& desc, float val, bool screen_hold)
 {
-	pending_display[1] = format_paramater_for_display(desc, val, _stripable, screen_hold);
+	pending_display[1] = format_parameter_for_display(desc, val, _stripable, screen_hold);
 
 	if (screen_hold) {
 		/* we just queued up a parameter to be displayed.
@@ -749,10 +753,12 @@ Strip::do_parameter_display (ARDOUR::ParameterDescriptor const& desc, float val,
 void
 Strip::handle_fader_touch (Fader& fader, bool touch_on)
 {
+	timepos_t now (_surface->mcp().transport_sample());
+
 	if (touch_on) {
-		fader.start_touch (_surface->mcp().transport_sample());
+		fader.start_touch (now);
 	} else {
-		fader.stop_touch (_surface->mcp().transport_sample());
+		fader.stop_touch (now);
 	}
 }
 

@@ -103,7 +103,7 @@ public:
 	void  set_strip_width (Width, bool save = false);
 	Width get_strip_width () const { return _strip_width; }
 
-	XMLNode& get_state ();
+	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int /* version */);
 
 	void save_plugin_order_file ();
@@ -122,6 +122,10 @@ public:
 
 	void select_next_strip ();
 	void select_prev_strip ();
+
+	void store_mixer_scene (size_t);
+	void recall_mixer_scene (size_t);
+	void clear_mixer_scene (size_t);
 
 	void do_vca_assign (boost::shared_ptr<ARDOUR::VCA>);
 	void do_vca_unassign (boost::shared_ptr<ARDOUR::VCA>);

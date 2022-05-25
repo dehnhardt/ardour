@@ -7,7 +7,7 @@
  * Copyright (C) 2015-2016 Ben Loftis <ben@harrisonconsoles.com>
  * Copyright (C) 2015-2018 John Emmas <john@creativepost.co.uk>
  * Copyright (C) 2015 Johannes Mueller <github@johannes-mueller.org>
- * Copyright (C) 2016-2018 Len Ovens <len@ovenwerks.net>
+ * Copyright (C) 2016-2022 Len Ovens <len@ovenwerks.net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -41,6 +41,8 @@
 #include <pbd/pthread_utils.h>
 #include <pbd/file_utils.h>
 #include <pbd/failed_constructor.h>
+
+#include "temporal/timeline.h"
 
 #include "ardour/amp.h"
 #include "ardour/session.h"
@@ -1303,7 +1305,7 @@ OSC::osc_toggle_roll (bool ret2strt)
 	} else {
 
 		if (session->get_play_loop() && Config->get_loop_is_mode()) {
-			session->request_locate (session->locations()->auto_loop_location()->start(), MustRoll);
+			session->request_locate (session->locations()->auto_loop_location()->start().samples(), MustRoll);
 		} else {
 			session->request_roll (TRS_UI);
 		}
@@ -3141,7 +3143,7 @@ OSC::set_marker (const char* types, lo_arg **argv, int argc, lo_message msg)
 				for (Locations::LocationList::const_iterator l = ll.begin(); l != ll.end(); ++l) {
 					if ((*l)->is_mark ()) {
 						if (strcmp (&argv[0]->s, (*l)->name().c_str()) == 0) {
-							session->request_locate ((*l)->start (), MustStop);
+							session->request_locate ((*l)->start_sample (), MustStop);
 							return 0;
 						} else if ((*l)->start () == session->transport_sample()) {
 							cur_mark = (*l);
@@ -3170,7 +3172,7 @@ OSC::set_marker (const char* types, lo_arg **argv, int argc, lo_message msg)
 	// get Locations that are marks
 	for (Locations::LocationList::const_iterator l = ll.begin(); l != ll.end(); ++l) {
 		if ((*l)->is_mark ()) {
-			lm.push_back (LocationMarker((*l)->name(), (*l)->start ()));
+			lm.push_back (LocationMarker((*l)->name(), (*l)->start_sample ()));
 		}
 	}
 	// sort them by position
@@ -3217,6 +3219,12 @@ OSC::click_level (float position)
 		session->click_gain()->gain_control()->set_value (session->click_gain()->gain_control()->interface_to_internal (position), PBD::Controllable::NoGroup);
 	}
 	return 0;
+}
+
+void
+OSC::loop_location (int start, int end)
+{
+	BasicUI::loop_location (timepos_t (start), timepos_t (end));
 }
 
 int
@@ -3497,7 +3505,6 @@ OSC::select_parse (const char *path, const char* types, lo_arg **argv, int argc,
 	}
 
 	return ret;
-
 }
 
 
@@ -3797,7 +3804,8 @@ OSC::_strip_parse (const char *path, const char *sub_path, const char* types, lo
 		if (!control_disabled && s->solo_control() && !s->is_master() && !s->is_monitor()) {
 			if (argc > (param_1)) {
 				if (s_int) {
-					s->solo_control()->set_value (yn ? 1.0 : 0.0, sur->usegroup);
+					fake_touch (s->solo_control());
+					session->set_control (s->solo_control(), yn ? 1.0 : 0.0, sur->usegroup);
 					ret = 0;
 				}
 			} else {
@@ -3883,7 +3891,7 @@ OSC::_strip_parse (const char *path, const char *sub_path, const char* types, lo
 		if (argc > (param_1)) {
 			if (s_int) {
 				//ignore button release
-				if (!yn) return 0;
+				if (yn) return 0;
 				sur->expand_enable = false;
 				set_stripable_selection (s);
 				ret = 0;
@@ -4453,11 +4461,11 @@ OSC::touch_detect (const char *path, const char* types, lo_arg **argv, int argc,
 		if (control) {
 			if (touch) {
 				//start touch
-				control->start_touch (control->session().transport_sample());
+				control->start_touch (timepos_t (control->session().transport_sample()));
 				ret = 0;
 			} else {
 				// end touch
-				control->stop_touch (control->session().transport_sample());
+				control->stop_touch (timepos_t (control->session().transport_sample()));
 				ret = 0;
 			}
 			// just in case some crazy surface starts sending control values before touch
@@ -4477,8 +4485,8 @@ OSC::fake_touch (boost::shared_ptr<ARDOUR::AutomationControl> ctrl)
 	if (ctrl) {
 		//start touch
 		if (ctrl->automation_state() == Touch && !ctrl->touching ()) {
-		ctrl->start_touch (ctrl->session().transport_sample());
-		_touch_timeout[ctrl] = 10;
+			ctrl->start_touch (timepos_t (ctrl->session().transport_sample()));
+			_touch_timeout[ctrl] = 10;
 		}
 	}
 
@@ -4624,8 +4632,7 @@ OSC::sel_new_personal_send (char *foldback, lo_message msg)
 		//boost::shared_ptr<Route> rt_send = ;
 		if (rt && (lsn_rt != rt)) {
 			// make sure there isn't one already
-			bool s_only = true;
-			if (!rt->feeds (lsn_rt, &s_only)) {
+			if (!rt->feeds (lsn_rt)) {
 				// create send
 				rt->add_foldback_send (lsn_rt, false);
 				//boost::shared_ptr<Send> snd = rt->internal_send_for (aux);
@@ -5927,7 +5934,7 @@ OSC::periodic (void)
 		if (!(*x).second) {
 			boost::shared_ptr<ARDOUR::AutomationControl> ctrl = (*x).first;
 			// turn touch off
-			ctrl->stop_touch (ctrl->session().transport_sample());
+			ctrl->stop_touch (timepos_t (ctrl->session().transport_sample()));
 			_touch_timeout.erase (x++);
 		} else {
 			x++;
@@ -5937,7 +5944,7 @@ OSC::periodic (void)
 }
 
 XMLNode&
-OSC::get_state ()
+OSC::get_state () const
 {
 	XMLNode& node (ControlProtocol::get_state());
 	node.set_property (X_("debugmode"), (int32_t) _debugmode); // TODO: enum2str
@@ -6316,8 +6323,7 @@ OSC::cue_new_send (string rt_name, lo_message msg)
 			boost::shared_ptr<Route> rt_send = session->route_by_name (rt_name);
 			if (rt_send && (aux != rt_send)) {
 				// make sure there isn't one already
-				bool s_only = true;
-				if (!rt_send->feeds (aux, &s_only)) {
+				if (!rt_send->feeds (aux)) {
 					// create send
 					rt_send->add_foldback_send (aux, false);
 					boost::shared_ptr<Send> snd = rt_send->internal_send_for (aux);
@@ -6608,13 +6614,9 @@ OSC::cue_get_sorted_stripables(boost::shared_ptr<Stripable> aux, uint32_t id, lo
 	Sorted sorted;
 
 	boost::shared_ptr<Route> aux_rt = boost::dynamic_pointer_cast<Route> (aux);
-	Route::FedBy fed_by = aux_rt->fed_by();
-	for (Route::FedBy::iterator i = fed_by.begin(); i != fed_by.end(); ++i) {
-		if (i->sends_only) {
-			boost::shared_ptr<Stripable> s (i->r.lock());
-			sorted.push_back (s);
-			s->DropReferences.connect (*this, MISSING_INVALIDATOR, boost::bind (&OSC::_cue_set, this, id, addr), this);
-		}
+	for (auto const& s : aux_rt->signal_sources (true)) {
+		sorted.push_back (s);
+		s->DropReferences.connect (*this, MISSING_INVALIDATOR, boost::bind (&OSC::_cue_set, this, id, addr), this);
 	}
 	sort (sorted.begin(), sorted.end(), StripableByPresentationOrder());
 

@@ -52,7 +52,7 @@ Message::run ()
 
 	bool splash_pushed = false;
 	Splash* spl = Splash::exists () ? Splash::instance() : NULL;
-	if (spl && spl->is_visible()) {
+	if (spl && spl->get_visible()) {
 		spl->pop_back_for (_message_dialog);
 		splash_pushed = true;
 	}
@@ -621,9 +621,9 @@ Dialog::Dialog (std::string const& title, luabridge::LuaRef lr)
 			if (i.value ()["align"].isString ()) {
 				std::string align = i.value ()["align"].cast <std::string> ();
 				if (align == "left") {
-					xalign = Gtk::ALIGN_LEFT;
+					xalign = Gtk::ALIGN_START;
 				} else if (align == "right") {
-					xalign = Gtk::ALIGN_RIGHT;
+					xalign = Gtk::ALIGN_END;
 				}
 			}
 			w = new LuaDialogHeading (title, xalign);
@@ -632,9 +632,9 @@ Dialog::Dialog (std::string const& title, luabridge::LuaRef lr)
 			if (i.value ()["align"].isString ()) {
 				std::string align = i.value ()["align"].cast <std::string> ();
 				if (align == "left") {
-					xalign = Gtk::ALIGN_LEFT;
+					xalign = Gtk::ALIGN_START;
 				} else if (align == "right") {
-					xalign = Gtk::ALIGN_RIGHT;
+					xalign = Gtk::ALIGN_END;
 				}
 			}
 			w = new LuaDialogLabel (title, xalign);

@@ -39,14 +39,14 @@ using namespace std;
 using namespace PBD;
 using namespace ARDOUR;
 
-Pannable::Pannable (Session& s)
-	: Automatable (s)
+Pannable::Pannable (Session& s, Temporal::TimeDomain td)
+	: Automatable (s, td)
 	, SessionHandleRef (s)
-	, pan_azimuth_control (new PanControllable (s, "", this, PanAzimuthAutomation))
-	, pan_elevation_control (new PanControllable (s, "", this, PanElevationAutomation))
-	, pan_width_control (new PanControllable (s, "", this, PanWidthAutomation))
-	, pan_frontback_control (new PanControllable (s, "", this, PanFrontBackAutomation))
-	, pan_lfe_control (new PanControllable (s, "", this, PanLFEAutomation))
+	, pan_azimuth_control (new PanControllable (s, "", this, PanAzimuthAutomation, td))
+	, pan_elevation_control (new PanControllable (s, "", this, PanElevationAutomation, td))
+	, pan_width_control (new PanControllable (s, "", this, PanWidthAutomation, td))
+	, pan_frontback_control (new PanControllable (s, "", this, PanFrontBackAutomation, td))
+	, pan_lfe_control (new PanControllable (s, "", this, PanLFEAutomation, td))
 	, _auto_state (Off)
 	, _has_state (false)
 	, _responding_to_control_auto_state_change (0)
@@ -151,7 +151,7 @@ Pannable::set_automation_state (AutoState state)
 }
 
 void
-Pannable::start_touch (double when)
+Pannable::start_touch (timepos_t const & when)
 {
 	const Controls& c (controls());
 
@@ -165,7 +165,7 @@ Pannable::start_touch (double when)
 }
 
 void
-Pannable::stop_touch (double when)
+Pannable::stop_touch (timepos_t const & when)
 {
 	const Controls& c (controls());
 
@@ -179,13 +179,13 @@ Pannable::stop_touch (double when)
 }
 
 XMLNode&
-Pannable::get_state ()
+Pannable::get_state () const
 {
 	return state ();
 }
 
 XMLNode&
-Pannable::state ()
+Pannable::state () const
 {
 	XMLNode* node = new XMLNode (X_("Pannable"));
 

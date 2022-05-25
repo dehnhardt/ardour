@@ -85,6 +85,7 @@
 #include "time_info_box.h"
 #include "timers.h"
 #include "transport_masters_dialog.h"
+#include "trigger_page.h"
 #include "virtual_keyboard_window.h"
 
 #include "pbd/i18n.h"
@@ -115,14 +116,6 @@ ARDOUR_UI::set_session (Session *s)
 	}
 
 	transport_ctrl.set_session (s);
-
-	if (big_transport_window) {
-		big_transport_window->set_session (s);
-	}
-
-	if (virtual_keyboard_window) {
-		virtual_keyboard_window->set_session (s);
-	}
 
 	update_path_label ();
 
@@ -161,11 +154,6 @@ ARDOUR_UI::set_session (Session *s)
 	secondary_clock->set_session (s);
 	big_clock->set_session (s);
 	video_timeline->set_session (s);
-	lua_script_window->set_session (s);
-	plugin_manager_ui->set_session (s);
-	plugin_dsp_load_window->set_session (s);
-	dsp_statistics_window->set_session (s);
-	transport_masters_window->set_session (s);
 	rc_option_editor->set_session (s);
 
 	roll_controllable->set_session (s);
@@ -285,7 +273,7 @@ ARDOUR_UI::set_session (Session *s)
 		ArdourMeter::ResetGroupPeakDisplays.connect (sigc::mem_fun(*this, &ARDOUR_UI::reset_group_peak_display));
 
 		editor_meter_peak_display.set_name ("meterbridge peakindicator");
-		editor_meter_peak_display.unset_flags (Gtk::CAN_FOCUS);
+		editor_meter_peak_display.set_can_focus (false);
 		editor_meter_peak_display.set_size_request (-1, std::max (5.f, std::min (12.f, rintf (8.f * UIConfiguration::instance().get_ui_scale()))) );
 		editor_meter_peak_display.set_corner_radius (1.0);
 
@@ -299,7 +287,7 @@ ARDOUR_UI::set_session (Session *s)
 }
 
 int
-ARDOUR_UI::unload_session (bool hide_stuff)
+ARDOUR_UI::unload_session (bool hide_stuff, bool force_unload)
 {
 	if (_session) {
 		ARDOUR_UI::instance()->video_timeline->sync_session_state();
@@ -315,7 +303,7 @@ ARDOUR_UI::unload_session (bool hide_stuff)
 		save_ardour_state ();
 	}
 
-	if (_session && _session->dirty()) {
+	if (!force_unload && _session && _session->dirty()) {
 		std::vector<std::string> actions;
 		actions.push_back (_("Don't close"));
 		if (_session->unnamed()) {
@@ -423,7 +411,7 @@ ARDOUR_UI::toggle_editor_and_mixer ()
 		if (!mwin) {
 			/* mixer's own window doesn't exist */
 			mixer->make_visible ();
-		} else if (!mwin->is_mapped ()) {
+		} else if (!mwin->get_mapped ()) {
 			/* mixer's own window exists but isn't mapped */
 			mixer->make_visible ();
 		} else {
@@ -447,7 +435,7 @@ ARDOUR_UI::toggle_editor_and_mixer ()
 		if (!ewin) {
 			/* mixer's own window doesn't exist */
 			editor->make_visible ();
-		} else if (!ewin->is_mapped ()) {
+		} else if (!ewin->get_mapped ()) {
 			/* editor's own window exists but isn't mapped */
 			editor->make_visible ();
 		} else {
@@ -481,6 +469,10 @@ ARDOUR_UI::step_up_through_tabs ()
 
 	if (mixer->tabbed()) {
 		candidates.push_back (mixer);
+	}
+
+	if (trigger_page->tabbed()) {
+		candidates.push_back (trigger_page);
 	}
 
 	if (rc_option_editor->tabbed()) {
@@ -526,6 +518,10 @@ ARDOUR_UI::step_down_through_tabs ()
 
 	if (mixer->tabbed()) {
 		candidates.push_back (mixer);
+	}
+
+	if (trigger_page->tabbed()) {
+		candidates.push_back (trigger_page);
 	}
 
 	if (rc_option_editor->tabbed()) {
@@ -642,12 +638,13 @@ ARDOUR_UI::tabs_page_added (Widget*,guint)
 	if (_tabs.get_n_pages() > 1) {
 
 		std::vector<TargetEntry> drag_target_entries;
-		drag_target_entries.push_back (TargetEntry ("tabbable"));
+		drag_target_entries.push_back (TargetEntry ("ardour/x-tabbable"));
 
 		editor_visibility_button.drag_source_set (drag_target_entries);
 		mixer_visibility_button.drag_source_set (drag_target_entries);
 		prefs_visibility_button.drag_source_set (drag_target_entries);
 		recorder_visibility_button.drag_source_set (drag_target_entries);
+		trigger_page_visibility_button.drag_source_set (drag_target_entries);
 
 		editor_visibility_button.drag_source_set_icon (Gtkmm2ext::pixbuf_from_string (editor->name(),
 		                                                                              Pango::FontDescription ("Sans 24"),
@@ -662,9 +659,13 @@ ARDOUR_UI::tabs_page_added (Widget*,guint)
 		                                                                             0, 0,
 		                                                                             Gdk::Color ("red")));
 		recorder_visibility_button.drag_source_set_icon (Gtkmm2ext::pixbuf_from_string (recorder->name(),
-		                                                                             Pango::FontDescription ("Sans 24"),
-		                                                                             0, 0,
-		                                                                             Gdk::Color ("red")));
+		                                                                                Pango::FontDescription ("Sans 24"),
+		                                                                                0, 0,
+		                                                                                Gdk::Color ("red")));
+		trigger_page_visibility_button.drag_source_set_icon (Gtkmm2ext::pixbuf_from_string (recorder->name(),
+		                                                                                    Pango::FontDescription ("Sans 24"),
+		                                                                                    0, 0,
+		                                                                                    Gdk::Color ("red")));
 	}
 }
 
@@ -676,6 +677,7 @@ ARDOUR_UI::tabs_page_removed (Widget*, guint)
 		mixer_visibility_button.drag_source_unset ();
 		prefs_visibility_button.drag_source_unset ();
 		recorder_visibility_button.drag_source_unset ();
+		trigger_page_visibility_button.drag_source_unset ();
 	}
 }
 
@@ -698,6 +700,10 @@ ARDOUR_UI::tabs_switch (GtkNotebookPage*, guint page)
 			recorder_visibility_button.set_active_state (Gtkmm2ext::Off);
 		}
 
+		if (trigger_page && (trigger_page->tabbed() || trigger_page->tabbed_by_default())) {
+			trigger_page_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
 	} else if (mixer && (page == (guint) _tabs.page_num (mixer->contents()))) {
 
 		if (editor && (editor->tabbed() || editor->tabbed_by_default())) {
@@ -712,6 +718,10 @@ ARDOUR_UI::tabs_switch (GtkNotebookPage*, guint page)
 
 		if (recorder && (recorder->tabbed() || recorder->tabbed_by_default())) {
 			recorder_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		if (trigger_page && (trigger_page->tabbed() || trigger_page->tabbed_by_default())) {
+			trigger_page_visibility_button.set_active_state (Gtkmm2ext::Off);
 		}
 
 	} else if (page == (guint) _tabs.page_num (rc_option_editor->contents())) {
@@ -730,6 +740,10 @@ ARDOUR_UI::tabs_switch (GtkNotebookPage*, guint page)
 			recorder_visibility_button.set_active_state (Gtkmm2ext::Off);
 		}
 
+		if (trigger_page && (trigger_page->tabbed() || trigger_page->tabbed_by_default())) {
+			trigger_page_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
 	} else if (page == (guint) _tabs.page_num (recorder->contents())) {
 
 		if (editor && (editor->tabbed() || editor->tabbed_by_default())) {
@@ -745,6 +759,30 @@ ARDOUR_UI::tabs_switch (GtkNotebookPage*, guint page)
 		}
 
 		recorder_visibility_button.set_active_state (Gtkmm2ext::ImplicitActive);
+
+		if (trigger_page && (trigger_page->tabbed() || trigger_page->tabbed_by_default())) {
+			trigger_page_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+	} else if (page == (guint) _tabs.page_num (trigger_page->contents())) {
+
+		if (editor && (editor->tabbed() || editor->tabbed_by_default())) {
+			editor_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		if (mixer && (mixer->tabbed() || mixer->tabbed_by_default())) {
+			mixer_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		if (rc_option_editor && (rc_option_editor->tabbed() || rc_option_editor->tabbed_by_default())) {
+			prefs_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		if (recorder && (recorder->tabbed() || recorder->tabbed_by_default())) {
+			recorder_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		trigger_page_visibility_button.set_active_state (Gtkmm2ext::ImplicitActive);
 
 	}
 }
@@ -836,6 +874,8 @@ ARDOUR_UI::tabbable_state_change (Tabbable& t)
 		vis_button = &prefs_visibility_button;
 	} else if (&t == recorder) {
 		vis_button = &recorder_visibility_button;
+	} else if (&t == trigger_page) {
+		vis_button = &trigger_page_visibility_button;
 	}
 
 	if (!vis_button) {
@@ -889,28 +929,6 @@ ARDOUR_UI::toggle_meterbridge ()
 		meterbridge->hide_window (NULL);
 	}
 }
-
-void
-ARDOUR_UI::toggle_luawindow ()
-{
-	assert (editor && luawindow);
-
-	bool show = false;
-
-	if (luawindow->not_visible ()) {
-		show = true;
-	}
-	// TODO check overlap
-
-	if (show) {
-		luawindow->show_window ();
-		luawindow->present ();
-		luawindow->raise ();
-	} else {
-		luawindow->hide_window (NULL);
-	}
-}
-
 
 void
 ARDOUR_UI::new_midi_tracer_window ()
@@ -976,7 +994,6 @@ BigTransportWindow*
 ARDOUR_UI::create_big_transport_window ()
 {
 	BigTransportWindow* btw = new BigTransportWindow ();
-	btw->set_session (_session);
 	return btw;
 }
 
@@ -984,8 +1001,14 @@ VirtualKeyboardWindow*
 ARDOUR_UI::create_virtual_keyboard_window ()
 {
 	VirtualKeyboardWindow* vkbd = new VirtualKeyboardWindow ();
-	vkbd->set_session (_session);
 	return vkbd;
+}
+
+LuaWindow*
+ARDOUR_UI::create_luawindow ()
+{
+	LuaWindow* luawindow = LuaWindow::instance ();
+	return luawindow;
 }
 
 void

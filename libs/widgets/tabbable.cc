@@ -87,7 +87,7 @@ Tabbable::window_visible () const
 		return false;
 	}
 
-	return _window->is_visible();
+	return _window->get_visible();
 }
 
 Window*
@@ -337,7 +337,7 @@ Tabbable::tabbed_by_default() const
 }
 
 XMLNode&
-Tabbable::get_state()
+Tabbable::get_state() const
 {
 	XMLNode& node (WindowProxy::get_state());
 

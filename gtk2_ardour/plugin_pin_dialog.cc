@@ -508,7 +508,7 @@ PluginPinWidget::refill_output_presets ()
 
 	PluginOutputConfiguration ppc (_pi->plugin (0)->possible_output ());
 	if (ppc.find (0) != ppc.end ()) {
-		// anyting goes
+		// anything goes
 		ppc.clear ();
 		if (n_audio != 0) {
 			ppc.insert (n_audio);
@@ -545,8 +545,8 @@ PluginPinWidget::refill_output_presets ()
 std::string
 PluginPinWidget::port_label (const std::string& portname, bool strip)
 {
-	// compare to MixerStrip::update_io_button()
-	string lpn (PROGRAM_NAME);
+	// compare to IOButton::update
+	string lpn (AudioEngine::instance()->my_name());
 	boost::to_lower (lpn);
 	std::string program_port_prefix = lpn + ":"; // e.g. "ardour:"
 
@@ -1583,7 +1583,7 @@ PluginPinWidget::connect_sidechain ()
 		_sidechain_selector = new IOSelectorWindow (_session, _pi->sidechain_input ());
 	}
 
-	if (_sidechain_selector->is_visible ()) {
+	if (_sidechain_selector->get_visible ()) {
 		_sidechain_selector->get_toplevel ()->get_window ()->raise ();
 	} else {
 		_sidechain_selector->present ();
@@ -1871,7 +1871,8 @@ PluginPinWidget::maybe_add_route_to_input_menu (boost::shared_ptr<Route> r, Data
 		return added;
 	}
 
-	if (_route ()->feeds_according_to_graph (r)) {
+	if (_route ()->feeds (r)) {
+		/* do not allow connfeedback */
 		return added;
 	}
 

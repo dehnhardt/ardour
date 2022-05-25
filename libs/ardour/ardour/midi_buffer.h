@@ -50,8 +50,6 @@ public:
 	void copy(const MidiBuffer& copy);
 	void copy(MidiBuffer const * const);
 
-	void skip_to (TimeType when);
-
 	bool push_back(const Evoral::Event<TimeType>& event);
 	bool push_back(TimeType time, Evoral::EventType event_type, size_t size, const uint8_t* data);
 
@@ -179,7 +177,7 @@ public:
 
 	/**
 	 * returns true if the message with the second argument as its MIDI
-	 * status byte should preceed the message with the first argument as
+	 * status byte should precede the message with the first argument as
 	 * its MIDI status byte.
 	 */
 	static bool second_simultaneous_midi_byte_is_first (uint8_t, uint8_t);

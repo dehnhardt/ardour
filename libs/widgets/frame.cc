@@ -97,7 +97,7 @@ Frame::on_size_request (GtkRequisition* r)
 	}
 
 	if (_w) {
-		_w->size_request (*r);
+		*r = _w->size_request ();
 	} else {
 		r->width  = 0;
 		r->height = 0;
@@ -171,7 +171,7 @@ Frame::on_style_changed (const Glib::RefPtr<Gtk::Style>& style)
 	if (_layout && (_layout->get_font_description ().gobj () == 0 || _layout->get_font_description () != new_style->get_font ())) {
 		_layout->set_font_description (new_style->get_font ());
 		queue_resize ();
-	} else if (is_realized ()) {
+	} else if (get_realized ()) {
 		queue_resize ();
 	}
 }
@@ -313,7 +313,7 @@ Frame::on_expose_event (GdkEventExpose* ev)
 		cr->restore ();
 	}
 
-	if (_w->is_visible ()) {
+	if (_w->get_visible ()) {
 		propagate_expose (*_w, ev);
 	}
 	return true;

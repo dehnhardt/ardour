@@ -323,9 +323,12 @@ ARDOUR::region_name_from_path (string path, bool strip_channels, bool add_channe
 
 	if (add_channel_suffix) {
 
+		/* compare to Session::format_audio_source_name */
 		path += '%';
 
-		if (total > 2) {
+		if (total > 25) {
+			path += string_compose ("%1", this_one + 1);
+		} else if (total > 2) {
 			path += (char) ('a' + this_one);
 		} else {
 			path += (char) (this_one == 0 ? 'L' : 'R');
@@ -415,9 +418,7 @@ ARDOUR::compute_equal_power_fades (samplecnt_t nframes, float* in, float* out)
 EditMode
 ARDOUR::string_to_edit_mode (string str)
 {
-	if (str == _("Splice")) {
-		return Splice;
-	} else if (str == _("Slide")) {
+	if (str == _("Slide")) {
 		return Slide;
 	} else if (str == _("Ripple")) {
 		return Ripple;
@@ -433,9 +434,6 @@ const char*
 ARDOUR::edit_mode_to_string (EditMode mode)
 {
 	switch (mode) {
-	case Slide:
-		return _("Slide");
-
 	case Lock:
 		return _("Lock");
 
@@ -443,8 +441,39 @@ ARDOUR::edit_mode_to_string (EditMode mode)
 		return _("Ripple");
 
 	default:
-	case Splice:
-		return _("Splice");
+	case Slide:
+		return _("Slide");
+	}
+}
+
+RippleMode
+ARDOUR::string_to_ripple_mode (string str)
+{
+	if (str == _("RippleSelected")) {
+		return RippleSelected;
+	} else if (str == _("RippleAll")) {
+		return RippleAll;
+	} else if (str == _("RippleInterview")) {
+		return RippleInterview;
+	}
+	fatal << string_compose (_("programming error: unknown ripple mode string \"%1\""), str) << endmsg;
+	abort(); /*NOTREACHED*/
+	return RippleSelected;
+}
+
+const char*
+ARDOUR::ripple_mode_to_string (RippleMode mode)
+{
+	switch (mode) {
+	case RippleInterview:
+		return _("RippleInterview");
+
+	case RippleAll:
+		return _("RippleAll");
+
+	default:
+	case RippleSelected:
+		return _("RippleSelected");
 	}
 }
 

@@ -41,6 +41,7 @@
 #include "ardour/types.h"
 #include "ardour/parameter_descriptor.h"
 #include "ardour/plugin.h"
+#include "ardour/plug_insert_base.h"
 #include "ardour/processor.h"
 #include "ardour/readonly_control.h"
 #include "ardour/sidechain.h"
@@ -56,10 +57,10 @@ class Plugin;
 
 /** Plugin inserts: send data through a plugin
  */
-class LIBARDOUR_API PluginInsert : public Processor
+class LIBARDOUR_API PluginInsert : public Processor, public PlugInsertBase
 {
 public:
-	PluginInsert (Session&, boost::shared_ptr<Plugin> = boost::shared_ptr<Plugin>());
+	PluginInsert (Session&, Temporal::TimeDomain td, boost::shared_ptr<Plugin> = boost::shared_ptr<Plugin>());
 	~PluginInsert ();
 
 	void drop_references ();
@@ -88,7 +89,7 @@ public:
 	bool write_immediate_event (Evoral::EventType event_type, size_t size, const uint8_t* buf);
 
 	void automation_run (samplepos_t, pframes_t, bool only_active = false);
-	bool find_next_event (double, double, Evoral::ControlEvent&, bool only_active = true) const;
+	bool find_next_event (Temporal::timepos_t const &, Temporal::timepos_t const &, Evoral::ControlEvent&, bool only_active = true) const;
 
 	int set_block_size (pframes_t nframes);
 
@@ -122,6 +123,8 @@ public:
 	bool inplace () const { return ! _no_inplace; }
 
 	bool is_channelstrip () const;
+
+	UIElements ui_elements () const;
 
 	void set_input_map (uint32_t, ChanMapping);
 	void set_output_map (uint32_t, ChanMapping);
@@ -211,7 +214,7 @@ public:
 
 		double get_value (void) const;
 		void catch_up_with_external_value (double val);
-		XMLNode& get_state();
+		XMLNode& get_state() const;
 		std::string get_user_string() const;
 
 	private:
@@ -228,7 +231,7 @@ public:
 		                       boost::shared_ptr<AutomationList> list=boost::shared_ptr<AutomationList>());
 
 		double get_value (void) const;
-		XMLNode& get_state();
+		XMLNode& get_state() const;
 	protected:
 		void actually_set_value (double value, PBD::Controllable::GroupControlDisposition);
 
@@ -316,7 +319,7 @@ public:
 	};
 
 protected:
-	XMLNode& state ();
+	XMLNode& state () const;
 
 private:
 	/* disallow copy construction */
@@ -360,7 +363,6 @@ private:
 	bool _strict_io;
 	bool _custom_cfg;
 	bool _maps_from_state;
-	bool _mapping_changed;
 
 	Match private_can_support_io_configuration (ChanCount const &, ChanCount &) const;
 	Match internal_can_support_io_configuration (ChanCount const &, ChanCount &) const;
@@ -413,7 +415,6 @@ private:
 	void create_automatable_parameters ();
 	void control_list_automation_state_changed (Evoral::Parameter, AutoState);
 	void set_parameter_state_2X (const XMLNode& node, int version);
-	void set_control_ids (const XMLNode&, int version);
 	void update_control_values (const XMLNode&, int version);
 
 	void enable_changed ();
@@ -439,8 +440,6 @@ private:
 
 	typedef std::map<uint32_t, boost::shared_ptr<ReadOnlyControl> >CtrlOutMap;
 	CtrlOutMap _control_outputs;
-
-	void preset_load_set_value (uint32_t, float);
 
 	PBD::TimingStats  _timing_stats;
 	GATOMIC_QUAL gint _stat_reset;

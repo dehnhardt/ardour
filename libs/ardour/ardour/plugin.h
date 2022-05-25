@@ -51,6 +51,7 @@ namespace ARDOUR
 class AudioEngine;
 class Session;
 class BufferSet;
+class IOPlug;
 class PluginInsert;
 class Plugin;
 class PluginInfo;
@@ -77,7 +78,7 @@ public:
 	Plugin (const Plugin&);
 	virtual ~Plugin ();
 
-	XMLNode&    get_state ();
+	XMLNode&    get_state () const;
 	virtual int set_state (const XMLNode&, int version);
 
 	virtual void set_insert_id (PBD::ID id) {}
@@ -347,6 +348,7 @@ public:
 	PBD::Signal1<void, uint32_t> EndTouch;
 
 protected:
+	friend class IOPlug;
 	friend class PluginInsert;
 	friend class Session;
 
@@ -398,7 +400,7 @@ private:
 	virtual void add_state (XMLNode*) const = 0;
 
 	bool             _have_presets;
-	MidiStateTracker _tracker;
+	MidiNoteTracker _tracker;
 	BufferSet        _pending_stop_events;
 	bool             _have_pending_stop_events;
 	PresetRecord     _last_preset;
@@ -481,7 +483,7 @@ public:
 	virtual bool reconfigurable_io () const { return false; }
 
 	/* max [re]configurable outputs (if finite, 0 otherwise) */
-	virtual uint32_t max_configurable_ouputs () const
+	virtual uint32_t max_configurable_outputs () const
 	{
 		return n_outputs.n_audio();
 	}

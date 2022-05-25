@@ -41,6 +41,7 @@
 
 using namespace std;
 using namespace ARDOUR;
+using namespace Temporal;
 
 VerboseCursor::VerboseCursor (Editor* editor)
 	: _editor (editor)
@@ -100,7 +101,7 @@ VerboseCursor::set_time (samplepos_t sample)
 {
 	char buf[128];
 	Timecode::Time timecode;
-	Timecode::BBT_Time bbt;
+	Temporal::BBT_Time bbt;
 
 	if (_editor->_session == 0) {
 		return;
@@ -112,7 +113,7 @@ VerboseCursor::set_time (samplepos_t sample)
 
 	switch (m) {
 	case AudioClock::BBT:
-		_editor->_session->bbt_time (sample, bbt);
+		bbt = TempoMap::use()->bbt_at (timepos_t (sample));
 		snprintf (buf, sizeof (buf), "%02" PRIu32 "|%02" PRIu32 "|%02" PRIu32, bbt.bars, bbt.beats, bbt.ticks);
 		break;
 
@@ -142,9 +143,9 @@ VerboseCursor::set_duration (samplepos_t start, samplepos_t end)
 {
 	char buf[128];
 	Timecode::Time timecode;
-	Timecode::BBT_Time sbbt;
-	Timecode::BBT_Time ebbt;
-	Meter meter_at_start (_editor->_session->tempo_map().meter_at_sample (start));
+	Temporal::BBT_Time sbbt;
+	Temporal::BBT_Time ebbt;
+	Meter const & meter_at_start (TempoMap::use()->metric_at (start).meter());
 
 	if (_editor->_session == 0) {
 		return;
@@ -155,8 +156,8 @@ VerboseCursor::set_duration (samplepos_t start, samplepos_t end)
 	switch (m) {
 	case AudioClock::BBT:
 	{
-		_editor->_session->bbt_time (start, sbbt);
-		_editor->_session->bbt_time (end, ebbt);
+		sbbt = TempoMap::use()->bbt_at (timepos_t (start));
+		ebbt = TempoMap::use()->bbt_at (timepos_t (end));
 
 		/* subtract */
 		/* XXX this computation won't work well if the
@@ -173,7 +174,7 @@ VerboseCursor::set_duration (samplepos_t start, samplepos_t end)
 
 		ticks -= sbbt.ticks;
 		if (ticks < 0) {
-			ticks += int (Timecode::BBT_Time::ticks_per_beat);
+			ticks += int (Temporal::ticks_per_beat);
 			--beats;
 		}
 

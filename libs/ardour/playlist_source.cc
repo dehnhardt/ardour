@@ -43,7 +43,7 @@ using namespace ARDOUR;
 using namespace PBD;
 
 PlaylistSource::PlaylistSource (Session& s, const ID& orig, const std::string& name, boost::shared_ptr<Playlist> p, DataType type,
-                                sampleoffset_t begin, samplecnt_t len, Source::Flag /*flags*/)
+                                timepos_t const & begin, timepos_t const & len, Source::Flag /*flags*/)
 	: Source (s, type, name)
 	, _playlist (p)
 	, _original (orig)
@@ -86,7 +86,7 @@ PlaylistSource::set_owner (PBD::ID const &id)
 }
 
 void
-PlaylistSource::add_state (XMLNode& node)
+PlaylistSource::add_state (XMLNode& node) const
 {
 	node.set_property ("playlist", _playlist->id ());
 	node.set_property ("offset", _playlist_offset);

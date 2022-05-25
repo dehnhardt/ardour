@@ -572,10 +572,11 @@ TrackMixLayout::strip_vpot_touch (int n, bool touching)
 {
 	boost::shared_ptr<AutomationControl> ac = knobs[n]->controllable();
 	if (ac) {
+		const timepos_t now (session.audible_sample());
 		if (touching) {
-			ac->start_touch (session.audible_sample());
+			ac->start_touch (now);
 		} else {
-			ac->stop_touch (session.audible_sample());
+			ac->stop_touch (now);
 		}
 	}
 }
@@ -602,7 +603,7 @@ TrackMixLayout::update_clocks ()
 	}
 
 	char buf[16];
-	Timecode::BBT_Time BBT = session.tempo_map().bbt_at_sample (pos);
+	Temporal::BBT_Time BBT = Temporal::TempoMap::fetch()->bbt_at (timepos_t (pos));
 
 #define BBT_BAR_CHAR "|"
 

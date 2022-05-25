@@ -46,6 +46,8 @@ public:
 	bool slaved_to (boost::shared_ptr<AutomationControl>) const;
 	bool slaved () const;
 
+	std::set<boost::shared_ptr<AutomationControl>> masters () const;
+
 	virtual void automation_run (samplepos_t start, pframes_t nframes);
 
 	double get_masters_value () const {
@@ -74,15 +76,15 @@ public:
 	void use_saved_master_ratios ();
 
 	int set_state (XMLNode const&, int);
-	XMLNode& get_state();
+	XMLNode& get_state() const;
 
-	bool find_next_event (double n, double e, Evoral::ControlEvent& ev) const
+	bool find_next_event (Temporal::timepos_t const & n, Temporal::timepos_t const & e, Evoral::ControlEvent& ev) const
 	{
 		Glib::Threads::RWLock::ReaderLock lm (master_lock);
 		return find_next_event_locked (n, e, ev);
 	}
 
-	bool find_next_event_locked (double now, double end, Evoral::ControlEvent& next_event) const;
+	bool find_next_event_locked (Temporal::timepos_t const & now, Temporal::timepos_t const & end, Evoral::ControlEvent& next_event) const;
 
 protected:
 
@@ -136,7 +138,7 @@ protected:
 	void   update_boolean_masters_records (boost::shared_ptr<AutomationControl>);
 
 	virtual bool get_masters_curve_locked (samplepos_t, samplepos_t, float*, samplecnt_t) const;
-	bool masters_curve_multiply (samplepos_t, samplepos_t, float*, samplecnt_t) const;
+	bool masters_curve_multiply (timepos_t const &, timepos_t const &, float*, samplecnt_t) const;
 
 	virtual double reduce_by_masters_locked (double val, bool) const;
 	virtual double scale_automation_callback (double val, double ratio) const;

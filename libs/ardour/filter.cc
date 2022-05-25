@@ -43,9 +43,10 @@ int
 Filter::make_new_sources (boost::shared_ptr<Region> region, SourceList& nsrcs, std::string suffix, bool use_session_sample_rate)
 {
 	vector<string> names = region->master_source_names();
-	assert (region->n_channels() <= names.size());
+	const SourceList::size_type nsrc = region->sources().size();
+	assert (nsrc <= names.size());
 
-	for (uint32_t i = 0; i < region->n_channels(); ++i) {
+	for (SourceList::size_type i = 0; i < nsrc; ++i) {
 
 		string name = PBD::basename_nosuffix (names[i]);
 
@@ -62,7 +63,7 @@ Filter::make_new_sources (boost::shared_ptr<Region> region, SourceList& nsrcs, s
 
 		const string path = (region->data_type() == DataType::MIDI)
 			? session.new_midi_source_path (name)
-			: session.new_audio_source_path (name, region->n_channels(), i, false);
+			: session.new_audio_source_path (name, nsrc, i, false);
 
 		if (path.empty()) {
 			error << string_compose (_("filter: error creating name for new file based on %1"), region->name())
@@ -71,16 +72,12 @@ Filter::make_new_sources (boost::shared_ptr<Region> region, SourceList& nsrcs, s
 		}
 
 		try {
-			samplecnt_t sample_rate;
-			if (use_session_sample_rate) {
-				sample_rate = session.sample_rate();
-			} else {
+			samplecnt_t sample_rate = session.sample_rate ();
+			if (!use_session_sample_rate) {
 				boost::shared_ptr<AudioRegion> aregion = boost::dynamic_pointer_cast<AudioRegion>(region);
 
 				if (aregion) {
 					sample_rate = aregion->audio_source()->sample_rate();
-				} else {
-					return -1;
 				}
 			}
 
@@ -114,7 +111,7 @@ Filter::finish (boost::shared_ptr<Region> region, SourceList& nsrcs, string regi
 		boost::shared_ptr<AudioFileSource> afs = boost::dynamic_pointer_cast<AudioFileSource>(*si);
 		if (afs) {
 			afs->done_with_peakfile_writes ();
-			afs->update_header (region->position(), *now, xnow);
+			afs->update_header (region->position_sample(), *now, xnow);
 			afs->mark_immutable ();
 		}
 
@@ -138,17 +135,17 @@ Filter::finish (boost::shared_ptr<Region> region, SourceList& nsrcs, string regi
 
 	PropertyList plist;
 
-	plist.add (Properties::start, 0);
+	plist.add (Properties::start, std::numeric_limits<timecnt_t>::min());
 	plist.add (Properties::length, region->length());
 	plist.add (Properties::name, region_name);
 	plist.add (Properties::whole_file, true);
-	plist.add (Properties::position, region->position());
 
 	boost::shared_ptr<Region> r = RegionFactory::create (nsrcs, plist);
 
 	boost::shared_ptr<AudioRegion> audio_region = boost::dynamic_pointer_cast<AudioRegion> (region);
 	boost::shared_ptr<AudioRegion> audio_r = boost::dynamic_pointer_cast<AudioRegion> (r);
 	if (audio_region && audio_r) {
+		audio_r->set_position (region->position());
 		audio_r->set_scale_amplitude (audio_region->scale_amplitude());
 		audio_r->set_fade_in_active (audio_region->fade_in_active ());
 		audio_r->set_fade_in (audio_region->fade_in ());

@@ -62,7 +62,7 @@ StepEntry::instance()
 
 StepEntry::StepEntry ()
 	: ArdourWindow (string())
-	, _current_note_length (1.0)
+	, _current_note_length (1, 0)
 	, _current_note_velocity (64)
 	, triplet_button ("3")
 	, dot_adjustment (0.0, 0.0, 3.0, 1.0, 1.0)
@@ -422,7 +422,7 @@ StepEntry::StepEntry ()
 	length_divisor_adjustment.signal_value_changed().connect (sigc::mem_fun (*this, &StepEntry::length_value_change));
 	dot_adjustment.signal_value_changed().connect (sigc::mem_fun (*this, &StepEntry::dot_value_change));
 
-	_piano.set_flags (Gtk::CAN_FOCUS);
+	_piano.set_can_focus ();
 
 	_piano.NoteOff.connect (sigc::mem_fun (*this, &StepEntry::note_off_event_handler));
 	_piano.Rest.connect (sigc::mem_fun (*this, &StepEntry::rest_event_handler));
@@ -549,7 +549,7 @@ StepEntry::note_length ()
 		base_time *= 1 + ((dots - 1.0)/dots);
 	}
 
-	return Temporal::Beats(base_time);
+	return Temporal::Beats::from_double (base_time);
 }
 
 uint8_t

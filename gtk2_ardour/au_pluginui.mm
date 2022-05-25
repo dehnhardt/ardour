@@ -29,6 +29,7 @@
 #include "pbd/convert.h"
 #include "pbd/error.h"
 
+#include "ardour/auditioner.h"
 #include "ardour/audio_unit.h"
 #include "ardour/debug.h"
 #include "ardour/plugin_insert.h"
@@ -363,7 +364,7 @@ static void interposed_drawIfNeeded (id receiver, SEL selector, NSRect rect)
 
 - (void)auViewResized:(NSNotification *)notification
 {
-	(void) notification; // stop complaints about unusued argument
+	(void) notification; // stop complaints about unused argument
 	plugin_ui->cocoa_view_resized();
 }
 
@@ -392,8 +393,8 @@ static void interposed_drawIfNeeded (id receiver, SEL selector, NSRect rect)
 }
 @end
 
-AUPluginUI::AUPluginUI (boost::shared_ptr<PluginInsert> insert)
-	: PlugUIBase (insert)
+AUPluginUI::AUPluginUI (boost::shared_ptr<PlugInsertBase> pib)
+	: PlugUIBase (pib)
 	, automation_mode_label (_("Automation"))
 	, preset_label (_("Presets"))
 	, resizable (false)
@@ -414,7 +415,7 @@ AUPluginUI::AUPluginUI (boost::shared_ptr<PluginInsert> insert)
 	set_popdown_strings (automation_mode_selector, automation_mode_strings);
 	automation_mode_selector.set_active_text (automation_mode_strings.front());
 
-	if ((au = boost::dynamic_pointer_cast<AUPlugin> (insert->plugin())) == 0) {
+	if ((au = boost::dynamic_pointer_cast<AUPlugin> (pib->plugin())) == 0) {
 		error << _("unknown type of editor-supplying plugin (note: no AudioUnit support in this version of ardour)") << endmsg;
 		throw failed_constructor ();
 	}
@@ -425,6 +426,7 @@ AUPluginUI::AUPluginUI (boost::shared_ptr<PluginInsert> insert)
 	top_box.set_homogeneous (false);
 	top_box.set_spacing (6);
 	top_box.set_border_width (6);
+
 	add_common_widgets (&top_box);
 
 	set_spacing (0);
@@ -811,7 +813,7 @@ AUPluginUI::cocoa_view_resized ()
 
 	plugin_requested_resize = 1;
 
-	ProcessorWindowProxy* wp = insert->window_proxy();
+	ProcessorWindowProxy* wp = _pi ? _pi->window_proxy() : NULL;
 	if (wp) {
 		/* Once a plugin has requested a resize of its own window, do
 		 * NOT save the window. The user may save state with the plugin
@@ -1130,7 +1132,7 @@ AUPluginUI::parent_cocoa_window ()
 	resizable = false;
 
 	if (toplevel && toplevel->is_toplevel()) {
-		toplevel->size_request (req);
+		req = toplevel->size_request ();
 		toplevel->set_size_request (req.width, req.height);
 		dynamic_cast<Gtk::Window*>(toplevel)->set_resizable (false);
 	}
@@ -1281,9 +1283,9 @@ AUPluginUI::stop_updating (GdkEventAny*)
 }
 
 PlugUIBase*
-create_au_gui (boost::shared_ptr<PluginInsert> plugin_insert, VBox** box)
+create_au_gui (boost::shared_ptr<PlugInsertBase> pib, VBox** box)
 {
-	AUPluginUI* aup = new AUPluginUI (plugin_insert);
+	AUPluginUI* aup = new AUPluginUI (pib);
 	(*box) = aup;
 	return aup;
 }

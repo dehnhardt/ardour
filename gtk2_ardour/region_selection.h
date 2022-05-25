@@ -48,6 +48,7 @@ public:
 
 	bool add (RegionView*);
 	bool remove (RegionView*);
+	bool remove (std::vector<RegionView*>);
 	void sort_by_position_and_track ();
 
 	bool contains (RegionView*) const;
@@ -56,11 +57,8 @@ public:
 
 	void clear_all();
 
-	samplepos_t start () const;
-
-	/* "end" collides with list<>::end */
-
-	samplepos_t end_sample () const;
+	Temporal::timepos_t start_time () const;
+	Temporal::timepos_t end_time () const;
 
 	const std::list<RegionView *>& by_layer() const { return _bylayer; }
 	void  by_position (std::list<RegionView*>&) const;

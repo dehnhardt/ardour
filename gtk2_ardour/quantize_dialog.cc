@@ -29,6 +29,7 @@
 #include "public_editor.h"
 
 #include "pbd/i18n.h"
+#include "pbd/integer_division.h"
 
 using namespace std;
 using namespace Gtk;
@@ -79,7 +80,7 @@ QuantizeDialog::QuantizeDialog (PublicEditor& e)
 	, swing_adjustment (100.0, -130.0, 130.0, 1.0, 10.0)
 	, swing_spinner (swing_adjustment)
 	, swing_button (_("Swing"))
-	, threshold_adjustment (0.0, -Timecode::BBT_Time::ticks_per_beat, Timecode::BBT_Time::ticks_per_beat, 1.0, 10.0)
+	, threshold_adjustment (0.0, -Temporal::ticks_per_beat, Temporal::ticks_per_beat, 1.0, 10.0)
 	, threshold_spinner (threshold_adjustment)
 	, threshold_label (_("Threshold (ticks)"))
 	, snap_start_button (_("Snap note start"))
@@ -135,42 +136,43 @@ QuantizeDialog::~QuantizeDialog()
 {
 }
 
-double
+Temporal::Beats
 QuantizeDialog::start_grid_size () const
 {
 	return grid_size_to_musical_time (start_grid_combo.get_active_text ());
 }
 
-double
+Temporal::Beats
 QuantizeDialog::end_grid_size () const
 {
 	return grid_size_to_musical_time (end_grid_combo.get_active_text ());
 }
 
-double
+Temporal::Beats
 QuantizeDialog::grid_size_to_musical_time (const string& txt) const
 {
 	if ( txt == _grid_strings[0] ) {  //"Main Grid"
 		bool success;
 
-		Temporal::Beats b = editor.get_grid_type_as_beats (success, 0);
+		Temporal::Beats b = editor.get_grid_type_as_beats (success, timepos_t (0));
 		if (!success) {
-			return 1.0;
+			return Temporal::Beats (1, 0);
 		}
-		return b.to_double();
+		return b;
 	}
 
 
-	double divisor = 1.0;
+	Temporal::Beats b (1, 0);
+
 	for (size_t i = 1; i < grid_strings.size(); ++i) {
 		if (txt == grid_strings[i]) {
 			assert (_grid_beats[i] != 0);
-			divisor = 1.0 / _grid_beats[i];
+			b = Temporal::Beats::ticks (int_div_round (Temporal::Beats::PPQN, (int32_t) i));
 			break;
 		}
 	}
 
-	return divisor;
+	return b;
 }
 
 float
@@ -189,8 +191,8 @@ QuantizeDialog::strength () const
 	return strength_adjustment.get_value ();
 }
 
-float
+Temporal::Beats
 QuantizeDialog::threshold () const
 {
-	return threshold_adjustment.get_value ();
+	return Temporal::Beats::from_double (threshold_adjustment.get_value ());
 }

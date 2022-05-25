@@ -37,6 +37,7 @@ public:
 
 	void render (Rect const &, Cairo::RefPtr<Cairo::Context>) const;
 	void compute_bounding_box () const;
+	void _size_allocate (Rect const&);
 
 	Rect const & get () const {
 		return _rect;
@@ -58,6 +59,14 @@ public:
 		return _rect.y1;
 	}
 
+	Distance height() const {
+		return _rect.height();
+	}
+
+	Distance width() const {
+		return _rect.height();
+	}
+
 	void set (Rect const &);
 	void set_x0 (Coord);
 	void set_y0 (Coord);
@@ -75,6 +84,8 @@ public:
          */
         double vertical_fraction (double y) const;
 
+        void set_corner_radius (double d);
+
 	enum What {
 		NOTHING = 0x0,
 		LEFT = 0x1,
@@ -87,12 +98,19 @@ public:
 	void set_outline_what (What);
 	void set_outline_all () { set_outline_what (ArdourCanvas::Rectangle::ALL); }
 
-  private:
+	void size_request (double& w, double& h) const;
+
+	void dump (std::ostream&) const;
+
+  protected:
 	/** Our rectangle; note that x0 may not always be less than x1
 	 *  and likewise with y0 and y1.
 	 */
 	Rect _rect;
+
+  private:
 	What _outline_what;
+	double _corner_radius;
 };
 
 }
