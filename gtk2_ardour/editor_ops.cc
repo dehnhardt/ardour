@@ -8912,6 +8912,57 @@ Editor::layer_display_comping_for_track (RouteTimeAxisView& route)
 }
 
 void
+Editor::finish_comping (RouteTimeAxisView& route, bool discard)
+{
+	std::shared_ptr<AudioPlaylist> playlist = std::dynamic_pointer_cast<AudioPlaylist> (route.playlist());
+	if (!playlist) {
+		return;
+	}
+
+	std::shared_ptr<RegionList> all_regions = playlist->region_list ();
+	for (auto const& r : *all_regions) {
+		if (!r->comp_source_id().empty()) {
+			r->clear_changes ();
+		}
+	}
+	playlist->clear_changes ();
+
+	samplepos_t rs = 0;
+	samplepos_t re = 0;
+	if (!selection->time.empty ()) {
+		rs = selection->time.start_sample ();
+		re = selection->time.end_sample ();
+	}
+
+	begin_reversible_command (discard ? _("discard comping layer") : _("finish comping"));
+	if (!(discard ? playlist->discard_comping_layer (rs, re) : playlist->finish_comping_layer (rs, re))) {
+		abort_reversible_command ();
+		return;
+	}
+
+	_session->add_command (new StatefulDiffCommand (playlist));
+	for (auto const& r : *all_regions) {
+		if (r->playlist() == playlist && r->changed ()) {
+			_session->add_command (new StatefulDiffCommand (r));
+		}
+	}
+	commit_reversible_command ();
+
+	bool comp_left = false;
+	std::shared_ptr<RegionList> remaining = playlist->region_list ();
+	for (auto const& r : *remaining) {
+		if (!r->comp_source_id().empty()) {
+			comp_left = true;
+			break;
+		}
+	}
+
+	if (!comp_left && route.layer_display() == Comping) {
+		route.set_layer_display (Stacked);
+	}
+}
+
+void
 Editor::add_to_comping_layer (RegionView* rv, samplepos_t start, samplepos_t end, bool remove)
 {
 	std::shared_ptr<AudioPlaylist> playlist = std::dynamic_pointer_cast<AudioPlaylist> (rv->region()->playlist());

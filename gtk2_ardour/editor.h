@@ -1424,6 +1424,7 @@ private:
 	void layer_display_overlaid ();
 	void layer_display_comping ();
 	void layer_display_comping_for_track (RouteTimeAxisView&);
+	void finish_comping (RouteTimeAxisView&, bool discard);
 
 	void launch_playlist_selector ();
 
