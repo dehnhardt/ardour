@@ -5659,7 +5659,21 @@ Editor::ui_parameter_changed (string parameter)
 {
 	EditingContext::ui_parameter_changed (parameter);
 
-	if (parameter == "icon-set") {
+	if (parameter == "enable-comping") {
+		bool const on = UIConfiguration::instance().get_enable_comping ();
+		Glib::RefPtr<Gtk::Action> act = ActionManager::get_action (X_("Editor"), X_("layer-display-comping"));
+		if (act) {
+			act->set_sensitive (on);
+		}
+		if (!on) {
+			track_views.foreach_route_time_axis ([] (RouteTimeAxisView* route) {
+				if (route && route->layer_display () == Comping) {
+					route->set_layer_display (Stacked);
+				}
+			});
+		}
+
+	} else if (parameter == "icon-set") {
 		_cursors->set_cursor_set (UIConfiguration::instance().get_icon_set());
 		content_right_pane.set_drag_cursor (*PublicEditor::instance().cursors()->expand_left_right);
 		editor_summary_pane.set_drag_cursor (*_cursors->expand_up_down);

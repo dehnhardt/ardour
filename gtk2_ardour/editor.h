@@ -1420,6 +1420,8 @@ private:
 	void toggle_layer_display ();
 	void layer_display_stacked ();
 	void layer_display_overlaid ();
+	void layer_display_comping ();
+	void layer_display_comping_for_track (RouteTimeAxisView&);
 
 	void launch_playlist_selector ();
 

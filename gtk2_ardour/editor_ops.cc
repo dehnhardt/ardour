@@ -59,6 +59,7 @@
 
 #include "ardour/audioengine.h"
 #include "ardour/audio_track.h"
+#include "ardour/audioplaylist.h"
 #include "ardour/audioregion.h"
 #include "ardour/boost_debug.h"
 #include "ardour/clip_library.h"
@@ -8867,6 +8868,47 @@ Editor::layer_display_stacked ()
 {
 	TrackViewList & tvl (selection->tracks.empty() ? track_views : selection->tracks);
 	tvl.foreach_route_time_axis (std::bind (&RouteTimeAxisView::set_layer_display, _1, Stacked));
+}
+
+void
+Editor::layer_display_comping ()
+{
+	if (!UIConfiguration::instance().get_enable_comping ()) {
+		return;
+	}
+
+	TrackViewList & tvl (selection->tracks.empty() ? track_views : selection->tracks);
+	tvl.foreach_route_time_axis ([this] (RouteTimeAxisView* route) {
+		if (route) {
+			layer_display_comping_for_track (*route);
+		}
+	});
+}
+
+void
+Editor::layer_display_comping_for_track (RouteTimeAxisView& route)
+{
+	if (!UIConfiguration::instance().get_enable_comping ()) {
+		return;
+	}
+
+	std::shared_ptr<AudioPlaylist> playlist = std::dynamic_pointer_cast<AudioPlaylist> (route.playlist());
+	if (playlist) {
+		playlist->clear_changes ();
+		samplepos_t rs = 0;
+		samplepos_t re = 0;
+		if (!selection->time.empty ()) {
+			rs = selection->time.start_sample ();
+			re = selection->time.end_sample ();
+		}
+		if (playlist->initialize_comping_layer (rs, re)) {
+			begin_reversible_command (_("initialize comping layer"));
+			_session->add_command (new StatefulDiffCommand (playlist));
+			commit_reversible_command ();
+		}
+	}
+
+	route.set_layer_display (Comping);
 }
 
 void

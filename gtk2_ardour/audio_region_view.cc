@@ -292,6 +292,7 @@ AudioRegionView::~AudioRegionView ()
 	in_destructor = true;
 
 	RegionViewGoingAway (this); /* EMIT_SIGNAL */
+	clear_comping_parts ();
 
 	for (vector<ScopedConnection*>::iterator i = _data_ready_connections.begin(); i != _data_ready_connections.end(); ++i) {
 		delete *i;
@@ -303,6 +304,73 @@ AudioRegionView::~AudioRegionView ()
 	}
 
 	/* all waveviews etc will be destroyed when the group is destroyed */
+}
+
+static uint32_t
+comping_color (std::string const& name, uint32_t fallback)
+{
+	bool failed = false;
+	uint32_t const c = UIConfiguration::instance().color (name, &failed);
+	return failed ? fallback : c;
+}
+
+uint32_t
+AudioRegionView::comping_layer_color ()
+{
+	return comping_color ("comp layer", 0x2e9e5bff);
+}
+
+uint32_t
+AudioRegionView::comping_source_color ()
+{
+	return comping_color ("comp selection", 0xf0a020a0);
+}
+
+void
+AudioRegionView::clear_comping_parts ()
+{
+	for (auto* part : selectedCompingParts) {
+		delete part;
+	}
+	selectedCompingParts.clear ();
+	selectedCompingRegions.clear ();
+}
+
+void
+AudioRegionView::set_comping_parts (std::vector<CompingSelection> const& parts)
+{
+	clear_comping_parts ();
+	selectedCompingRegions = parts;
+	redraw_comping_parts ();
+}
+
+void
+AudioRegionView::redraw_comping_parts ()
+{
+	for (auto* part : selectedCompingParts) {
+		delete part;
+	}
+	selectedCompingParts.clear ();
+
+	samplepos_t const region_start = region()->position_sample();
+	samplepos_t const region_end = region_start + region()->length_samples();
+	for (auto const& selection : selectedCompingRegions) {
+		samplepos_t const part_start = std::max (selection._start, region_start);
+		samplepos_t const part_end = std::min (selection._start + selection._length, region_end);
+		if (part_start >= part_end) {
+			continue;
+		}
+
+		ArdourCanvas::Rectangle* part = new ArdourCanvas::Rectangle (group);
+		part->set_ignore_events (true);
+		part->set_x0 (trackview.editor().sample_to_pixel (part_start - region_start));
+		part->set_x1 (trackview.editor().sample_to_pixel (part_end - region_start));
+		part->set_y0 (1);
+		part->set_y1 (_effective_height - 1);
+		part->set_outline (false);
+		part->set_fill_color (comping_source_color ());
+		selectedCompingParts.push_back (part);
+	}
 }
 
 std::shared_ptr<ARDOUR::AudioRegion>
@@ -622,6 +690,7 @@ AudioRegionView::set_height (gdouble height)
 	}
 
 	setup_fade_handle_positions();
+	redraw_comping_parts ();
 }
 
 void
@@ -1050,6 +1119,7 @@ AudioRegionView::set_samples_per_pixel (gdouble fpp)
 	}
 
 	reset_fade_shapes ();
+	redraw_comping_parts ();
 }
 
 void
@@ -1744,6 +1814,11 @@ AudioRegionView::set_frame_color ()
 
 	RegionView::set_frame_color ();
 
+	if (!region()->comp_source_id().empty()) {
+		frame->set_fill_color (comping_layer_color ());
+		frame->set_gradient (ArdourCanvas::Fill::StopList (), 0);
+	}
+
 	set_waveform_colors ();
 }
 
@@ -1774,7 +1849,7 @@ AudioRegionView::update_coverage_frame (LayerDisplay d)
 {
 	RegionView::update_coverage_frame (d);
 
-	if (d == Stacked) {
+	if (d == Stacked || d == Comping ) {
 		if (fade_in_handle)       { fade_in_handle->raise_to_top (); }
 		if (fade_out_handle)      { fade_out_handle->raise_to_top (); }
 		if (fade_in_trim_handle)  { fade_in_trim_handle->raise_to_top (); }

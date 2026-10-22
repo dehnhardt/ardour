@@ -144,6 +144,12 @@ public:
 	void show_xfades ();
 	void show_start_xfade ();
 	void show_end_xfade ();
+	/** colours used for the comping workflow, independent of the normal selection colours */
+	static uint32_t comping_layer_color ();
+	static uint32_t comping_source_color ();
+
+	void clear_comping_parts ();
+	void set_comping_parts (std::vector<CompingSelection> const&);
 
 	bool start_xfade_visible () const {
 		return _start_xfade_visible;
@@ -167,6 +173,8 @@ protected:
 		WaveformRectified = 0x8,
 		WaveformLogScaled = 0x10,
 	};
+
+	std::vector<ArdourCanvas::Rectangle *> selectedCompingParts;
 
 	std::vector<ArdourWaveView::WaveView *> waves;
 	std::vector<ArdourWaveView::WaveView *> tmp_waves; ///< see \ref create_waves()
@@ -222,6 +230,8 @@ protected:
 	void redisplay (bool) {}
 
 private:
+	void redraw_comping_parts ();
+
 	void setup_fade_handle_positions ();
 
 	void parameter_changed (std::string const &);

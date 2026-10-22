@@ -163,6 +163,7 @@ public:
 	virtual void reverse_region () = 0;
 	virtual void normalize_region () = 0;
 	virtual void pitch_shift_region () = 0;
+	virtual void layer_display_comping_for_track (RouteTimeAxisView&) = 0;
 
 	virtual void transition_to_rolling (bool fwd) = 0;
 
