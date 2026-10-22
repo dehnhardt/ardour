@@ -8912,6 +8912,39 @@ Editor::layer_display_comping_for_track (RouteTimeAxisView& route)
 }
 
 void
+Editor::add_to_comping_layer (RegionView* rv, samplepos_t start, samplepos_t end, bool remove)
+{
+	std::shared_ptr<AudioPlaylist> playlist = std::dynamic_pointer_cast<AudioPlaylist> (rv->region()->playlist());
+	if (!playlist) {
+		return;
+	}
+
+	std::shared_ptr<RegionList> comp_regions (new RegionList);
+	std::shared_ptr<RegionList> all_regions = playlist->region_list ();
+	for (auto const& r : *all_regions) {
+		if (!r->comp_source_id().empty()) {
+			r->clear_changes ();
+			comp_regions->push_back (r);
+		}
+	}
+	playlist->clear_changes ();
+
+	begin_reversible_command (remove ? _("remove from comping layer") : _("add to comping layer"));
+	if (!(remove ? playlist->remove_from_comping_layer (rv->region(), start, end) : playlist->add_to_comping_layer (rv->region(), start, end))) {
+		abort_reversible_command ();
+		return;
+	}
+
+	_session->add_command (new StatefulDiffCommand (playlist));
+	for (auto const& r : *comp_regions) {
+		if (r->playlist() == playlist && r->changed()) {
+			_session->add_command (new StatefulDiffCommand (r));
+		}
+	}
+	commit_reversible_command ();
+}
+
+void
 Editor::launch_playlist_selector ()
 {
 	TrackViewList & tvl (selection->tracks);

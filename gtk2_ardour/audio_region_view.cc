@@ -306,6 +306,28 @@ AudioRegionView::~AudioRegionView ()
 	/* all waveviews etc will be destroyed when the group is destroyed */
 }
 
+bool
+AudioRegionView::comping_edge_at (samplepos_t pos, samplecnt_t slop, samplepos_t& span_start, samplepos_t& span_end, bool& at_start) const
+{
+	for (auto const& sel : selectedCompingRegions) {
+		samplepos_t const s = std::max (sel._start, region()->position_sample());
+		samplepos_t const e = std::min (sel._start + sel._length, region()->position_sample() + region()->length_samples());
+		bool const start_inner = std::any_of (selectedCompingRegions.begin(), selectedCompingRegions.end(), [s] (CompingSelection const& o) { return o._start + o._length == s; });
+		bool const end_inner = std::any_of (selectedCompingRegions.begin(), selectedCompingRegions.end(), [e] (CompingSelection const& o) { return o._start == e; });
+
+		/* when both edges are close (tiny span) prefer the nearer one */
+		bool const near_start = !start_inner && std::abs (pos - s) <= slop;
+		bool const near_end = !end_inner && std::abs (pos - e) <= slop;
+		if (near_start || near_end) {
+			at_start = near_start && (!near_end || std::abs (pos - s) <= std::abs (pos - e));
+			span_start = s;
+			span_end = e;
+			return true;
+		}
+	}
+	return false;
+}
+
 static uint32_t
 comping_color (std::string const& name, uint32_t fallback)
 {

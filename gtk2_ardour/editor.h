@@ -164,6 +164,7 @@ public:
 	~Editor ();
 
 	void             set_session (ARDOUR::Session*);
+	void             add_to_comping_layer (RegionView*, ARDOUR::samplepos_t start, ARDOUR::samplepos_t end, bool remove = false);
 
 	Gtk::Window* use_own_window (bool and_fill_it);
 
@@ -767,6 +768,7 @@ private:
 
 	Gtk::VBox global_vpacker;
 
+	bool _comping_cursor_active = false;
 	Gdk::Cursor* which_track_cursor () const;
 	Gdk::Cursor* which_mode_cursor () const;
 	Gdk::Cursor* which_trim_cursor (bool left_side) const;

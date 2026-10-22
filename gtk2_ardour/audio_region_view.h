@@ -148,6 +148,9 @@ public:
 	static uint32_t comping_layer_color ();
 	static uint32_t comping_source_color ();
 
+	/** @return true if @p pos is within @p slop samples of an outer edge of a comp span;
+	 *  @p span_start / @p span_end receive that span and @p at_start which edge it is. */
+	bool comping_edge_at (ARDOUR::samplepos_t pos, ARDOUR::samplecnt_t slop, ARDOUR::samplepos_t& span_start, ARDOUR::samplepos_t& span_end, bool& at_start) const;
 	void clear_comping_parts ();
 	void set_comping_parts (std::vector<CompingSelection> const&);
 
